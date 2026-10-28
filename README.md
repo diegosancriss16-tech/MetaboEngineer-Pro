@@ -392,3 +392,16 @@ Si usas MetaboEngineer Pro en una publicación, cita:
 ## 📄 Licencia
 
 Este proyecto está bajo la licencia MIT. Ver [`LICENSE`](LICENSE) para más detalles.
+
+---
+
+## 🧪 Tests
+
+El proyecto usa [pytest](https://pytest.org/) para tests automatizados.
+
+### Correr todos los tests
+
+```bash
+pytest
+
+[![Tests](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml/badge.svg)](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml)
