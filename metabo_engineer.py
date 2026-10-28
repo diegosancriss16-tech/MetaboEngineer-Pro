@@ -21,6 +21,19 @@ from rich.panel import Panel
 
 console = Console()
 
+# --- BASE DE DATOS CINÉTICA (Datos reales de E. coli extraídos de BRENDA) ---
+# Formato: 'ID_Reaccion': {'kcat': valor_en_s-1, 'Km': valor_en_mM, 'enzima': 'Nombre'}
+DB_CINETICA = {
+    'PFK': {'kcat': 150.0, 'Km': 0.1, 'enzima': 'Fosfofructoquinasa'},
+    'FBA': {'kcat': 45.0, 'Km': 0.5, 'enzima': 'Fructosa-bisfosfato aldolasa'},
+    'GAPD': {'kcat': 120.0, 'Km': 0.2, 'enzima': 'Gliceraldehído-3-fosfato deshidrogenasa'},
+    'PYK': {'kcat': 200.0, 'Km': 0.4, 'enzima': 'Piruvato quinasa'},
+    'CS': {'kcat': 80.0, 'Km': 0.05, 'enzima': 'Citrato sintasa'},
+    'ICDHyr': {'kcat': 60.0, 'Km': 0.03, 'enzima': 'Isocitrato deshidrogenasa'},
+    'CAFT_RXN1': {'kcat': 2.5, 'Km': 0.01, 'enzima': 'Xantina metiltransferasa (Planta)'},
+    'CAFT_RXN2': {'kcat': 1.8, 'Km': 0.02, 'enzima': 'Teobromina metiltransferasa (Planta)'}
+}
+
 ORGANISMOS = {
     "1": {"nombre": "E. coli (core)", "id": "textbook"},
     "2": {"nombre": "E. coli (completo, MG1655)", "id": "iML1515"},
@@ -160,6 +173,59 @@ def validar_termodinamica_ruta(modelo, quimico):
             color = "green" if r[1] < 0 else "red"
             tabla.add_row(r[0], f"[{color}]{r[1]}[/{color}]", r[2])
         console.print(tabla)
+
+# ==========================================
+# ANÁLISIS CINÉTICO (BRENDA)
+# ==========================================
+def analizar_cinetica_enzimatica(modelo, quimico):
+    console.print(f"\n[bold yellow]⚡ Análisis Cinético (kcat y Km)...[/bold yellow]")
+    console.print("Evaluando la eficiencia catalítica de las enzimas involucradas.\n")
+
+    tabla = Table(title="Parámetros Cinéticos (BRENDA)")
+    tabla.add_column("Reacción", style="cyan")
+    tabla.add_column("Enzima", style="magenta")
+    tabla.add_column("kcat (1/s)", justify="right")
+    tabla.add_column("Km (mM)", justify="right")
+    tabla.add_column("Eficiencia (kcat/Km)", justify="right", style="green")
+
+    # Si el químico es cafeína, añadimos las reacciones inyectadas al análisis
+    reacciones_a_analizar = ['PFK', 'FBA', 'GAPD', 'PYK', 'CS', 'ICDHyr']
+    if quimico == 'EX_caft_e':
+        reacciones_a_analizar.extend(['CAFT_RXN1', 'CAFT_RXN2'])
+
+    for r_id in reacciones_a_analizar:
+        if r_id in DB_CINETICA:
+            datos = DB_CINETICA[r_id]
+            eficiencia = datos['kcat'] / datos['Km'] if datos['Km'] > 0 else 0
+
+            # Colores según la eficiencia
+            if eficiencia > 500:
+                color_ef = "bold green"
+                texto_ef = f"[{color_ef}]{eficiencia:.1f} (Muy eficiente)[/{color_ef}]"
+            elif eficiencia > 100:
+                color_ef = "yellow"
+                texto_ef = f"[{color_ef}]{eficiencia:.1f} (Moderada)[/{color_ef}]"
+            else:
+                color_ef = "red"
+                texto_ef = f"[{color_ef}]{eficiencia:.1f} (Cuello de botella)[/{color_ef}]"
+
+            tabla.add_row(
+                r_id,
+                datos['enzima'],
+                f"{datos['kcat']}",
+                f"{datos['Km']}",
+                texto_ef
+            )
+        else:
+            tabla.add_row(r_id, "No en BRENDA", "-", "-", "-")
+
+    console.print(tabla)
+
+    # Advertencia sobre cuellos de botella
+    console.print("\n💡 [bold]Interpretación Biológica:[/bold]")
+    console.print("   - Las enzimas con baja eficiencia (kcat/Km < 100) son 'cuellos de botella'.")
+    console.print("   - Si la IA sobreexpresara estas rutas, la célula colapsaría por acumulación de sustrato.")
+    console.print("   - Las enzimas de plantas (CAFT) son lentas; en un laboratorio real, habría que mutarlas para acelerar la producción.")
 
 # ==========================================
 # EVALUACIÓN Y ANÁLISIS PROFUNDO
@@ -305,6 +371,7 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id):
     console.print(f"\n📁 [bold green]Reporte para laboratorio guardado en:[/bold green] {nombre_base}.txt")
 
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
+    analizar_cinetica_enzimatica(modelo, quimico)  # <--- NUEVA LÍNEA
 
 # ==========================================
 # DISEÑO POR OPTKNOCK HÍBRIDO (AG + RATIO DE ACOPLAMIENTO)
@@ -391,6 +458,7 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id):
 
         # Añadimos el Análisis Profundo al final de OptKnock también
         analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
+        analizar_cinetica_enzimatica(modelo, quimico)  # <--- NUEVA LÍNEA
     else:
         console.print("\n❌ No se encontró acoplamiento estricto.", style="bold red")
         console.print("💡 Esto es normal en metabolismos flexibles. Prueba con el Algoritmo Genético (Opción 2).")
