@@ -17,16 +17,15 @@ console = Console()
 # La cinetica (kcat/Km) se obtendria de BRENDA, que requiere API autenticada.
 # Por eso el reporte solo incluye cinetica si el usuario la aporta por separado.
 
-
 def get_organism_id(modelo_id: str) -> str:
     """Taxon ID de UniProt segun modelo. Universal."""
     if "iYO844" in modelo_id: return "224308"    # B. subtilis
     if "iCW773" in modelo_id: return "196627"    # C. glutamicum
     if "iMM904" in modelo_id: return "559292"    # S. cerevisiae
+    if "iEK1008" in modelo_id: return "1773"     # M. tuberculosis
     if "textbook" in modelo_id or "iML1515" in modelo_id or "coli" in modelo_id.lower():
         return "83333"                            # E. coli K-12
     return "83333"
-
 
 def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
     """
@@ -35,8 +34,9 @@ def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
     if not re.search(r'\d', gen_id):
         return gen_id, "Nombre comun", "N/A"
 
+    # PARCHE: Busca por gene_exact o locus_tag
     url = (f"https://rest.uniprot.org/uniprotkb/search?"
-           f"query=organism_id:{organism_id}+AND+gene_exact:{gen_id}"
+           f"query=organism_id:{organism_id}+AND+(gene_exact:{gen_id}+OR+locus_tag:{gen_id})"
            f"&fields=gene_names,protein_name,xref_rhea&format=json")
     try:
         time.sleep(0.2)
@@ -54,7 +54,6 @@ def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
     except:
         pass
     return gen_id, "No encontrado", "N/A"
-
 
 def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness):
     """
@@ -115,6 +114,7 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
                 pass
 
         f.write("\n---\n")
-        f.write("*Generado automaticamente por MetaboEngineer Pro V5.1 - Universal*\n")
+        # PARCHE: Version actualizada a V5.7
+        f.write("*Generado automaticamente por MetaboEngineer Pro V5.7 - Universal*\n")
 
     console.print(f"[green]OK[/green] Reporte guardado: [cyan]{nombre_archivo}[/cyan]")
