@@ -6,11 +6,13 @@ from cobra import Reaction, Metabolite
 from cobra.io import load_model, read_sbml_model, write_sbml_model
 import random
 import os
+import sys
 import requests
 import time
 import re
 import json
 import hashlib
+import logging
 from requests.exceptions import RequestException
 from datetime import datetime
 from rich.console import Console
@@ -53,6 +55,46 @@ COSTOS_PROTEICOS = {
 
 
 # ==========================================
+# LOGGING A ARCHIVO
+# ==========================================
+def setup_logger():
+    """Configura logging a archivo en logs/. Devuelve la ruta del log."""
+    if not os.path.exists("logs"):
+        os.makedirs("logs")
+    log_file = f"logs/run_{datetime.now():%Y%m%d_%H%M%S}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[logging.FileHandler(log_file, encoding="utf-8")]
+    )
+    logging.info("=" * 60)
+    logging.info("MetaboEngineer Pro V5.4 - Session started")
+    logging.info("=" * 60)
+    return log_file
+
+
+# ==========================================
+# SEED REPRODUCIBLE
+# ==========================================
+def preguntar_seed():
+    """Pregunta al usuario por la semilla aleatoria. Enter = aleatoria."""
+    try:
+        entrada = Prompt.ask("Semilla aleatoria (Enter = aleatoria)", default="").strip()
+        if entrada == "":
+            seed = random.randint(0, 999999)
+            console.print(f"[cyan]INFO[/cyan] Semilla aleatoria generada: [bold]{seed}[/bold]")
+            console.print(f"[dim]Para reproducir este resultado, usa: --seed {seed}[/dim]")
+            return seed
+        seed = int(entrada)
+        console.print(f"[cyan]INFO[/cyan] Semilla fija: [bold]{seed}[/bold]")
+        return seed
+    except (ValueError, KeyboardInterrupt):
+        seed = random.randint(0, 999999)
+        console.print(f"[yellow]WARN[/yellow] Semilla invalida, usando: {seed}")
+        return seed
+
+
+# ==========================================
 # HELPER: detectar ID de UniProt por organismo
 # ==========================================
 def get_organism_id(modelo_id: str) -> str:
@@ -66,12 +108,60 @@ def get_organism_id(modelo_id: str) -> str:
 
 
 # ==========================================
-# TRADUCTOR DE GENES (UNIPROT)
+# CACHE UNIPROT (offline)
+# ==========================================
+_RUTA_CACHE_UNIPROT = "cache_uniprot.json"
+
+
+def _cargar_cache_uniprot():
+    """Carga cache de traducciones UniProt desde disco."""
+    if not os.path.exists(_RUTA_CACHE_UNIPROT):
+        return {}
+    try:
+        with open(_RUTA_CACHE_UNIPROT, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _guardar_cache_uniprot(cache):
+    """Guardado atomico del cache."""
+    tmp = _RUTA_CACHE_UNIPROT + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cache, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, _RUTA_CACHE_UNIPROT)
+
+
+def limpiar_cache_uniprot():
+    """Borra el cache de UniProt."""
+    if os.path.exists(_RUTA_CACHE_UNIPROT):
+        os.remove(_RUTA_CACHE_UNIPROT)
+        console.print(f"[green]OK[/green] Cache UniProt eliminado.")
+        logging.info("Cache UniProt eliminado manualmente")
+    else:
+        console.print("[yellow]WARN[/yellow] No hay cache que borrar.")
+
+
+# ==========================================
+# TRADUCTOR DE GENES (UNIPROT) - CON CACHE
 # ==========================================
 def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
+    """
+    Consulta UniProt con cache offline.
+    Primero busca en cache; si no esta, consulta la API y guarda.
+    """
     if not re.search(r'\d', gen_id):
         return gen_id, "Nombre comun"
 
+    # --- CACHE HIT ---
+    cache = _cargar_cache_uniprot()
+    clave = f"{organismo_id_uniprot}:{gen_id}"
+    if clave in cache:
+        logging.debug(f"UniProt cache HIT: {clave}")
+        return tuple(cache[clave])
+
+    # --- CACHE MISS: consultar API ---
+    logging.debug(f"UniProt cache MISS: {clave} -> consultando API")
     url = (f"https://rest.uniprot.org/uniprotkb/search?"
            f"query=organism_id:{organismo_id_uniprot}+AND+gene_exact:{gen_id}"
            f"&fields=gene_names,protein_name&format=json")
@@ -87,14 +177,17 @@ def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
                                     .get('recommendedName', {})
                                     .get('fullName', {})
                                     .get('value', 'Funcion desconocida'))
+                # Guardar en cache
+                cache[clave] = [nombre_gen, nombre_proteina]
+                _guardar_cache_uniprot(cache)
                 return nombre_gen, nombre_proteina
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"UniProt error para {gen_id}: {e}")
     return gen_id, "No encontrado en UniProt"
 
 
 # ==========================================
-# DESCARGA ROBUSTA (reintentos + headers + espejos)
+# DESCARGA ROBUSTA
 # ==========================================
 _HEADERS_NAVEGADOR = {
     "User-Agent": (
@@ -249,7 +342,7 @@ def cargar_modelo_universal(modelo_id):
     ruta_local = f"modelos/{modelo_id}.xml"
     indice = _cargar_indice()
 
-    # PRIORIDAD 1: disco local (con verificacion de integridad)
+    # PRIORIDAD 1: disco local
     if os.path.exists(ruta_local):
         if modelo_id in indice["modelos"]:
             sha_esperado = indice["modelos"][modelo_id].get("sha256")
@@ -264,10 +357,12 @@ def cargar_modelo_universal(modelo_id):
                 if indice["modelos"][modelo_id].get("alias_de"):
                     alias = indice["modelos"][modelo_id]["alias_de"]
                     console.print(f"[yellow]INFO[/yellow] '{modelo_id}' es alias de '{alias}'.")
+                logging.info(f"Modelo cargado desde disco: {modelo_id}")
                 return modelo, f"Modelo '{modelo_id}' cargado desde disco local (indexado)."
         else:
             modelo = read_sbml_model(ruta_local)
             _registrar_modelo(modelo, modelo_id, ruta_local, fuente="local_manual")
+            logging.info(f"Modelo cargado desde disco (sin indice previo): {modelo_id}")
             return modelo, f"Modelo '{modelo_id}' cargado desde disco local (nuevo indexado)."
 
     # PRIORIDAD 2: cobrapy nativo
@@ -282,12 +377,14 @@ def cargar_modelo_universal(modelo_id):
             _registrar_modelo(modelo, modelo_id, ruta_local, fuente="cobrapy_bigg")
         except Exception:
             pass
+        logging.info(f"Modelo descargado via cobrapy: {modelo_id}")
         return modelo, f"Modelo '{modelo_id}' descargado via cobrapy (BiGG/BioModels)."
     except Exception as e_orig:
         console.print(f"[yellow]WARN[/yellow] load_model fallo: {str(e_orig)[:120]}")
         console.print("[cyan]INFO[/cyan] Probando descarga directa con headers de navegador...")
+        logging.warning(f"load_model fallo para {modelo_id}: {e_orig}")
 
-    # PRIORIDAD 3: descarga directa con espejos
+    # PRIORIDAD 3: descarga directa
     errores = []
     for url in _urls_candidatas(modelo_id):
         ok, detalle = _descargar_xml(url, ruta_local, max_intentos=2, timeout=25)
@@ -295,6 +392,7 @@ def cargar_modelo_universal(modelo_id):
             try:
                 modelo = read_sbml_model(ruta_local)
                 _registrar_modelo(modelo, modelo_id, ruta_local, fuente="espejo_directo")
+                logging.info(f"Modelo descargado via espejo: {url}")
                 return modelo, f"Modelo '{modelo_id}' descargado desde espejo directo (indexado)."
             except Exception as e_read:
                 errores.append(f"{url}\n      lectura SBML fallo: {str(e_read)[:100]}")
@@ -304,6 +402,7 @@ def cargar_modelo_universal(modelo_id):
     # PRIORIDAD 4: error claro
     detalle = "\n".join(f"  - {e}" for e in errores)
     ruta_abs = os.path.abspath(ruta_local)
+    logging.error(f"Fallo total al cargar {modelo_id}: {detalle}")
     raise Exception(
         f"No se pudo cargar '{modelo_id}' desde ninguna fuente.\n\n"
         f"CAUSA PROBABLE: servidores de BiGG caidos.\n\n"
@@ -352,6 +451,7 @@ def inyectar_ruta_heterologa(modelo, quimico):
                 modelo.add_reactions([r])
 
         console.print("[green]OK[/green] Ruta de cafeina inyectada.")
+        logging.info("Ruta de cafeina inyectada")
         return modelo, "EX_caft_e"
     return None, None
 
@@ -376,6 +476,7 @@ def analizar_termodinamica_cepa(modelo, quimico, genes_knockout):
         analizar_termodinamica_universal(modelo, reacciones_relevantes[:10])
     except Exception as e:
         console.print(f"[yellow]WARN[/yellow] Termodinamica fallo: {e}")
+        logging.warning(f"Termodinamica fallo: {e}")
 
 
 # ==========================================
@@ -418,13 +519,18 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
         console.print(f"   -> Rendimiento Ajustado: [bold green]{max(0.0, produccion - costo):.4f}[/bold green] mmol/gDW/h")
         carga = sol_final.fluxes.abs().sum()
         console.print(f"   -> Carga Metabolica Total: [bold magenta]{carga:.2f}[/bold magenta]")
+        logging.info(f"Analisis profundo: produccion={produccion:.4f}, penalizacion={costo:.2f}, carga={carga:.2f}")
         analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
 
 
 # ==========================================
-# DISENO DE CEPA POR IA
+# DISENO DE CEPA POR IA (con seed reproducible)
 # ==========================================
-def disenar_cepa_ia(modelo, nombre_organismo, modelo_id):
+def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
+    if seed is not None:
+        random.seed(seed)
+        logging.info(f"IA iniciada con seed={seed}")
+
     console.print(f"\n[cyan]INFO[/cyan] Diseno de cepas por IA para {nombre_organismo}...")
     quimico = Prompt.ask("Quimico objetivo (ej. EX_succ_e, EX_caft_e)", default="EX_succ_e").strip()
 
@@ -441,6 +547,8 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id):
     gens = IntPrompt.ask("Generaciones", default=10)
     pop_size = IntPrompt.ask("Poblacion", default=20)
     mutaciones = IntPrompt.ask("Genes a apagar", default=4)
+
+    logging.info(f"IA params: quimico={quimico}, gens={gens}, pop={pop_size}, mut={mutaciones}")
 
     gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
@@ -464,11 +572,13 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id):
             fitness_hijo = evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)
             nueva.append({"genes": hijo, "fitness": fitness_hijo})
         poblacion = nueva
+        logging.debug(f"Gen {gen+1}/{gens}: best={poblacion[0]['fitness']:.4f}")
 
     mejor = sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
 
     console.print(f"\n[green]OK[/green] Diseno completado.")
     console.print(f"Fitness: {mejor['fitness']:.4f}\n")
+    logging.info(f"IA completada: fitness={mejor['fitness']:.4f}, genes={mejor['genes']}")
 
     console.print("[cyan]INFO[/cyan] Traduciendo nombres de genes con UniProt...")
     tabla_genes = Table(title="Genes a apagar (Knockouts)")
@@ -489,26 +599,34 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id):
             generar_documento_markdown(modelo, modelo_id, quimico, mejor["genes"], mejor["fitness"])
         except Exception as e:
             console.print(f"[yellow]WARN[/yellow] Reporte fallo: {e}")
+            logging.warning(f"Reporte fallo: {e}")
     else:
         if not os.path.exists("reportes"): os.makedirs("reportes")
         fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
         nombre_base = f"reportes/cepa_lab_{modelo_id}_{quimico}_{fecha}"
         with open(f"{nombre_base}.txt", "w", encoding="utf-8") as f:
             f.write("REPORTE DE INGENIERIA METABOLICA\n")
+            f.write(f"Fecha: {datetime.now().isoformat()}\n")
             f.write(f"Organismo: {nombre_organismo}\n")
             f.write(f"Quimico: {quimico}\n")
             f.write(f"Fitness: {mejor['fitness']:.4f} mmol/gDW/h\n")
+            f.write(f"Seed: {seed}\n")
             for rg in reporte_genes:
                 f.write(f"  - {rg}\n")
         console.print(f"[green]OK[/green] Reporte basico guardado: {nombre_base}.txt")
+        logging.info(f"Reporte basico guardado: {nombre_base}.txt")
 
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
 
 
 # ==========================================
-# DISENO POR OPTKNOCK
+# DISENO POR OPTKNOCK (con seed reproducible)
 # ==========================================
-def optknock_algoritmo(modelo, nombre_organismo, modelo_id):
+def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
+    if seed is not None:
+        random.seed(seed)
+        logging.info(f"OptKnock iniciado con seed={seed}")
+
     console.print(f"\n[cyan]INFO[/cyan] Diseno por OptKnock Hibrido...")
 
     quimico = Prompt.ask("Quimico objetivo (ej. EX_succ_e, EX_caft_e)", default="EX_succ_e").strip()
@@ -526,6 +644,8 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id):
     max_mutaciones = IntPrompt.ask("Cuantos genes apagar simultaneamente?", default=3)
     generaciones = IntPrompt.ask("Generaciones de la IA", default=15)
     pop_size = IntPrompt.ask("Tamano de poblacion", default=30)
+
+    logging.info(f"OptKnock params: quimico={quimico}, mut={max_mutaciones}, gen={generaciones}, pop={pop_size}")
 
     gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
@@ -580,16 +700,22 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id):
         console.print(f"Genes a apagar: [bold cyan]{', '.join(mejor['genes'])}[/bold cyan]")
         console.print(f"Ratio de Acoplamiento: [bold yellow]{mejor['fitness']:.4f}[/bold yellow] mmol quimico / mmol biomasa")
         console.print("La celula crece de forma optima cuando produce el quimico.")
+        logging.info(f"OptKnock completado: ratio={mejor['fitness']:.4f}, genes={mejor['genes']}")
         analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
     else:
         console.print("\n[red]ERROR[/red] No se encontro acoplamiento estricto.")
         console.print("Sugerencia: metabolismos flexibles requieren el Algoritmo Genetico (Opcion 2).")
+        logging.warning("OptKnock: no se encontro acoplamiento")
 
 
 # ==========================================
-# ANALISIS INTEGRAL
+# ANALISIS INTEGRAL (con seed reproducible)
 # ==========================================
-def analisis_integral(modelo, nombre_organismo, modelo_id):
+def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
+    if seed is not None:
+        random.seed(seed)
+        logging.info(f"Analisis Integral iniciado con seed={seed}")
+
     console.print(f"\n[cyan]INFO[/cyan] Analisis Integral (Diseno + Termo + Mapa + Reporte)...")
 
     quimico = Prompt.ask("Quimico objetivo (ej. EX_succ_e, EX_caft_e)", default="EX_succ_e")
@@ -607,6 +733,8 @@ def analisis_integral(modelo, nombre_organismo, modelo_id):
     gens = IntPrompt.ask("Generaciones de la IA", default=10)
     pop_size = IntPrompt.ask("Poblacion", default=20)
     mutaciones = IntPrompt.ask("Genes a apagar", default=4)
+
+    logging.info(f"Integral params: quimico={quimico}, gen={gens}, pop={pop_size}, mut={mutaciones}")
 
     console.print("\n[cyan]INFO[/cyan] Fase 1: Evolucion Genetica...")
     gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
@@ -633,6 +761,7 @@ def analisis_integral(modelo, nombre_organismo, modelo_id):
 
     mejor = sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
     console.print(f"[green]OK[/green] Mejor Cepa: {', '.join(mejor['genes'])} (Fitness: {mejor['fitness']:.4f})")
+    logging.info(f"Fase 1 completada: fitness={mejor['fitness']:.4f}, genes={mejor['genes']}")
 
     console.print("\n[cyan]INFO[/cyan] Fase 2: Analisis Fisicoquimico...")
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
@@ -641,8 +770,10 @@ def analisis_integral(modelo, nombre_organismo, modelo_id):
         console.print("\n[cyan]INFO[/cyan] Fase 3: Generando Mapa Visual...")
         try:
             generar_mapa_universal(modelo_id, quimico)
+            logging.info("Mapa visual generado")
         except Exception as e:
             console.print(f"[yellow]WARN[/yellow] Mapa visual fallo: {e}")
+            logging.warning(f"Mapa visual fallo: {e}")
     else:
         console.print("\n[yellow]WARN[/yellow] Fase 3 omitida: modulo visual no disponible.")
 
@@ -650,8 +781,10 @@ def analisis_integral(modelo, nombre_organismo, modelo_id):
         console.print("\n[cyan]INFO[/cyan] Fase 4: Generando Reporte Cientifico...")
         try:
             generar_documento_markdown(modelo, modelo_id, quimico, mejor["genes"], mejor["fitness"])
+            logging.info("Reporte cientifico generado")
         except Exception as e:
             console.print(f"[yellow]WARN[/yellow] Reporte fallo: {e}")
+            logging.warning(f"Reporte fallo: {e}")
 
     console.print("\n[green]OK[/green] Analisis Integral completado.")
 
@@ -662,30 +795,32 @@ def analisis_integral(modelo, nombre_organismo, modelo_id):
 def main():
     console.clear()
     console.print(Panel.fit(
-        "[bold green]MetaboEngineer Pro V5.2[/bold green]\n"
+        "[bold green]MetaboEngineer Pro V5.4[/bold green]\n"
         "Suite Universal de Biologia de Sistemas",
         style="bold green"
     ))
 
-    # Sincronizar indice (detecta XMLs copiados manualmente)
+    log_file = setup_logger()
+    console.print(f"[dim]Log: {log_file}[/dim]\n")
+
     _sincronizar_indice()
 
     console.print("\n[bold]Selecciona el organismo base:[/bold]")
     for key, val in ORGANISMOS.items():
         console.print(f"  {key}. {val['nombre']}")
 
-    # Mostrar modelos ya cacheados
     cacheados = listar_modelos_cacheados()
     claves_cache = []
     if cacheados:
         console.print("\n[bold cyan]Modelos ya en cache local (listos sin internet):[/bold cyan]")
         for i, (mid, meta) in enumerate(cacheados.items(), start=1):
             alias = f" (alias de {meta['alias_de']})" if meta.get('alias_de') else ""
-            console.print(f"  [c{i}] {mid} — {meta['reacciones']} reacciones, "
+            # FIX: escapar corchetes para que Rich no los interprete como markup
+            console.print(f"  \\[c{i}] {mid} — {meta['reacciones']} reacciones, "
                           f"{meta['genes']} genes, {meta['fecha'][:10]}{alias}")
             claves_cache.append(f"c{i}")
         claves_cache.append("c0")
-        console.print("  [c0] Seleccion normal (descargar nuevo)")
+        console.print("  \\[c0] Seleccion normal (descargar nuevo)")
 
     opciones_validas = list(ORGANISMOS.keys()) + claves_cache
 
@@ -695,7 +830,6 @@ def main():
         console.print("\n[yellow]INFO[/yellow] Seleccion cancelada.")
         return
 
-    # Resolver seleccion
     if opcion.startswith("c") and opcion != "c0":
         idx = int(opcion[1:]) - 1
         modelo_id = list(cacheados.keys())[idx]
@@ -721,24 +855,30 @@ def main():
             modelo_id = ORGANISMOS[opcion]["id"]
             nombre_organismo = ORGANISMOS[opcion]["nombre"]
 
+    # Pedir seed ANTES de cargar el modelo
+    seed = preguntar_seed()
+    logging.info(f"Organismo seleccionado: {modelo_id}, seed={seed}")
+
     with console.status(f"[bold yellow]Cargando modelo {modelo_id}...[/bold yellow]"):
         try:
             modelo, mensaje = cargar_modelo_universal(modelo_id)
             console.print(f"[green]OK[/green] {mensaje} | {len(modelo.reactions)} reacciones.\n")
         except Exception as e:
             console.print(Panel(str(e), title="ERROR de carga", border_style="red"))
+            logging.error(f"Error cargando modelo: {e}")
             return
 
     while True:
-        console.print("\n[bold]--- MENU PRINCIPAL (V5.2) ---[/bold]")
+        console.print("\n[bold]--- MENU PRINCIPAL (V5.4) ---[/bold]")
         console.print("1. [cyan]Analisis de Flujos Basico (FBA)[/cyan]")
         console.print("2. [green]Diseno de Cepas por IA (+ Reporte Cientifico)[/green]")
         console.print("3. [magenta]Diseno por OptKnock (Acoplamiento de Crecimiento)[/magenta]")
         console.print("4. [bold blue]Analisis Integral (Diseno + Termo + Mapa + Reporte)[/bold blue]")
-        console.print("5. [bold red]Salir[/bold red]")
+        console.print("5. [bold yellow]Limpiar cache UniProt[/bold yellow]")
+        console.print("6. [bold red]Salir[/bold red]")
 
         try:
-            op = Prompt.ask("\nSelecciona una opcion", choices=["1", "2", "3", "4", "5"])
+            op = Prompt.ask("\nSelecciona una opcion", choices=["1", "2", "3", "4", "5", "6"])
         except KeyboardInterrupt:
             console.print("\n[yellow]INFO[/yellow] Saliendo.")
             break
@@ -747,14 +887,18 @@ def main():
             sol = modelo.optimize()
             if sol.status == 'optimal':
                 console.print(f"[green]OK[/green] Crecimiento: [bold green]{sol.objective_value:.4f}[/bold green] h-1")
+                logging.info(f"FBA: crecimiento={sol.objective_value:.4f}")
         elif op == "2":
-            disenar_cepa_ia(modelo, nombre_organismo, modelo_id)
+            disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=seed)
         elif op == "3":
-            optknock_algoritmo(modelo, nombre_organismo, modelo_id)
+            optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=seed)
         elif op == "4":
-            analisis_integral(modelo, nombre_organismo, modelo_id)
+            analisis_integral(modelo, nombre_organismo, modelo_id, seed=seed)
         elif op == "5":
+            limpiar_cache_uniprot()
+        elif op == "6":
             console.print("Saliendo. Hasta luego.")
+            logging.info("Session ended")
             break
 
 
@@ -763,3 +907,7 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         console.print("\n[yellow]INFO[/yellow] Programa interrumpido por el usuario.")
+        logging.info("Interrupted by user")
+    except Exception as e:
+        console.print(f"\n[red]FATAL ERROR[/red] {e}")
+        logging.exception("Fatal error")

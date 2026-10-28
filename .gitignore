@@ -92,3 +92,5 @@ descargas/
 # --- OS ---
 *.bak
 *~
+# Cache de UniProt (local, no compartir)
+cache_uniprot.json
