@@ -1,0 +1,7 @@
+cobra
+equilibrator-api
+rich
+requests
+pandas
+networkx
+pyvis
