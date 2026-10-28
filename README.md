@@ -36,3 +36,5 @@ Durante las pruebas, la herramienta logró diseñar una cepa de *E. coli* MG1655
 
 **Tecnologías Utilizadas:**
 `Python 3.12`, `COBRApy`, `Equilibrator-API`, `Pandas`, `Scikit-learn`, `Rich` (UI), `UniProt REST API`.
+
+Nota: Si la descarga automática falla, ve a BiGG Models, busca el modelo (ej. iML1515), descarga el archivo .xml y guárdalo dentro de una carpeta llamada modelos/ en la raíz del proyecto.
