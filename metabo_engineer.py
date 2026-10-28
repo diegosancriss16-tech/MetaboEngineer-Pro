@@ -21,6 +21,16 @@ from rich.panel import Panel
 
 console = Console()
 
+# --- IMPORTACIÓN PROTEGIDA DE MÓDULOS EXTERNOS ---
+MODULOS_EXTERNOS_DISPONIBLES = False
+try:
+    from visualizador_universal import generar_mapa_universal
+    from modulo_termodinamica_v2 import analizar_termodinamica_universal, construir_reaccion
+    MODULOS_EXTERNOS_DISPONIBLES = True
+except ImportError as e:
+    console.print(f"[yellow]⚠️ Módulos externos no disponibles ({e}). "
+                  f"El 'Análisis Integral' funcionará en modo reducido (sin termo universal ni mapa visual).[/yellow]")
+
 # --- BASE DE DATOS CINÉTICA (Datos reales de E. coli extraídos de BRENDA) ---
 DB_CINETICA = {
     'PFK': {'kcat': 150.0, 'Km': 0.1, 'enzima': 'Fosfofructoquinasa'},
@@ -450,7 +460,6 @@ def simulador_evolucion_dirigida(modelo, nombre_organismo, modelo_id):
 
     quimico = Prompt.ask("¿Qué químico quieres producir? (ej. EX_caft_e)", default="EX_caft_e")
 
-    # Inyectar ruta si es necesario
     if quimico not in modelo.reactions:
         if quimico == "EX_caft_e":
             if Prompt.ask("¿Inyectar ruta de la planta de café?", choices=["S", "N"], default="S").upper() == "S":
@@ -461,7 +470,6 @@ def simulador_evolucion_dirigida(modelo, nombre_organismo, modelo_id):
         else:
             console.print("❌ Químico no válido.", style="bold red"); return
 
-    # Identificar cuellos de botella
     cuellos_de_botella = []
     for r_id, datos in DB_CINETICA.items():
         if r_id in modelo.reactions:
@@ -479,10 +487,9 @@ def simulador_evolucion_dirigida(modelo, nombre_organismo, modelo_id):
     factor_mutacion = IntPrompt.ask(f"¿Cuántas veces más rápida quieres hacer la enzima {enzima_objetivo}?", default=10)
 
     # FORZAR CUELLO DE BOTELLA PARA PRUEBA (Límite bajo artificial)
-    modelo.reactions.get_by_id(enzima_objetivo).bounds = (0, 5.0)  # Límite de 5
+    modelo.reactions.get_by_id(enzima_objetivo).bounds = (0, 5.0)
     console.print(f"[yellow]⚠️ Prueba: Límite artificial de 5.0 impuesto a {enzima_objetivo} para simular una enzima débil.[/yellow]")
 
-    # --- SIMULACIÓN ANTES DE LA MUTACIÓN ---
     modelo_original = modelo.copy()
     gen_biomasa = [r.id for r in modelo_original.reactions if "biomass" in r.id.lower()][0]
     modelo_original.reactions.get_by_id(quimico).bounds = (0, 1000.0)
@@ -490,7 +497,6 @@ def simulador_evolucion_dirigida(modelo, nombre_organismo, modelo_id):
     sol_original = modelo_original.optimize()
     prod_original = sol_original.objective_value if sol_original.status == 'optimal' else 0.0
 
-    # --- SIMULACIÓN DESPUÉS DE LA MUTACIÓN ---
     console.print(f"\nMutando {enzima_objetivo} (kcat x{factor_mutacion})...")
     modelo_mutado = modelo.copy()
     modelo_mutado.reactions.get_by_id(quimico).bounds = (0, 1000.0)
@@ -503,7 +509,6 @@ def simulador_evolucion_dirigida(modelo, nombre_organismo, modelo_id):
     sol_mutado = modelo_mutado.optimize()
     prod_mutada = sol_mutado.objective_value if sol_mutado.status == 'optimal' else 0.0
 
-    # --- RESULTADOS ---
     tabla = Table(title=f"Resultados de Evolución Dirigida: {enzima_objetivo}")
     tabla.add_column("Estado", style="cyan")
     tabla.add_column("Producción (mmol/gDW/h)", style="magenta")
@@ -523,46 +528,157 @@ def simulador_evolucion_dirigida(modelo, nombre_organismo, modelo_id):
         console.print(f"   Mutar {enzima_objetivo} no mejora la producción. El verdadero cuello de botella está en otra parte de la ruta.")
 
 # ==========================================
+# ANÁLISIS INTEGRAL (TODO EN UNO)
+# ==========================================
+def analisis_integral(modelo, nombre_organismo, modelo_id):
+    console.print(f"\n[bold magenta]🚀 INICIANDO ANÁLISIS INTEGRAL (Todo en Uno)...[/bold magenta]")
+    console.print("Este módulo ejecutará el diseño por IA, validará termodinámica, cinética y generará un mapa visual.\n")
+
+    quimico = Prompt.ask("¿Qué químico quieres producir? (ej. EX_succ_e, EX_caft_e)", default="EX_succ_e")
+
+    if quimico not in modelo.reactions:
+        console.print(f"\n[bold red]⚠️ El químico '{quimico}' no es nativo.[/bold red]")
+        if quimico == "EX_caft_e":
+            if Prompt.ask("¿Inyectar ruta de la planta de café?", choices=["S", "N"], default="S").upper() == "S":
+                modelo, quimico = inyectar_ruta_heterologa(modelo, quimico)
+                if modelo is None: return
+            else: return
+        else:
+            console.print("No hay ruta pre-programada.", style="bold red"); return
+
+    gens = IntPrompt.ask("Generaciones de la IA", default=10)
+    pop_size = IntPrompt.ask("Tamaño de población", default=20)
+    mutaciones = IntPrompt.ask("Genes a apagar", default=4)
+
+    # 1. Diseño por IA (Algoritmo Genético)
+    console.print("\n[bold cyan]Fase 1: Evolución Genética...[/bold cyan]")
+    gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
+    modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
+    todos_los_genes = [g.id for g in modelo.genes]
+
+    poblacion = []
+    for _ in range(pop_size):
+        genes_mutados = random.sample(todos_los_genes, mutaciones)
+        fitness = evaluar_bacteria(modelo, genes_mutados, quimico, gen_biomasa)
+        poblacion.append({"genes": genes_mutados, "fitness": fitness})
+
+    for gen in track(range(gens), description="Evolucionando..."):
+        poblacion.sort(key=lambda x: x["fitness"], reverse=True)
+        mejores = poblacion[:5]
+        nueva_poblacion = mejores.copy()
+        while len(nueva_poblacion) < pop_size:
+            padre1 = random.choice(mejores)["genes"]
+            padre2 = random.choice(mejores)["genes"]
+            hijo = list(set(padre1[:3] + padre2[3:]))
+            if len(hijo) < mutaciones: hijo.append(random.choice(todos_los_genes))
+            fitness_hijo = evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)
+            nueva_poblacion.append({"genes": hijo, "fitness": fitness_hijo})
+        poblacion = nueva_poblacion
+
+    mejor = sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
+    console.print(f"✅ Mejor Cepa: {', '.join(mejor['genes'])} (Fitness: {mejor['fitness']:.4f})")
+
+    # 2. Análisis Profundo (Termo + Cinetica)
+    console.print("\n[bold cyan]Fase 2: Análisis Fisicoquímico...[/bold cyan]")
+    analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
+    analizar_cinetica_enzimatica(modelo, quimico)
+
+    # 3. Termodinámica Universal (V2.2) - opcional
+    if MODULOS_EXTERNOS_DISPONIBLES:
+        console.print("\n[bold cyan]Fase 3: Termodinámica Universal Automática...[/bold cyan]")
+        reacciones_a_probar = [r.id for r in modelo.reactions if not r.id.startswith("EX_")][:10]
+        try:
+            analizar_termodinamica_universal(modelo, reacciones_a_probar)
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Termo universal falló: {e}[/yellow]")
+
+        # 4. Mapa Visual Interactivo
+        console.print("\n[bold cyan]Fase 4: Generando Mapa Visual...[/bold cyan]")
+        try:
+            generar_mapa_universal(modelo_id, quimico)
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Mapa visual falló: {e}[/yellow]")
+    else:
+        console.print("\n[yellow]⚠️ Fases 3 y 4 omitidas: módulos externos no disponibles.[/yellow]")
+
+    # 5. Guardar Reporte Maestro
+    if not os.path.exists("reportes"): os.makedirs("reportes")
+    fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nombre_base = f"reportes/analisis_integral_{modelo_id}_{quimico}_{fecha}"
+
+    with open(f"{nombre_base}.txt", "w", encoding="utf-8") as f:
+        f.write("==================================================\n")
+        f.write("       REPORTE DE ANÁLISIS INTEGRAL (V3.0)\n")
+        f.write("==================================================\n")
+        f.write(f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Organismo: {nombre_organismo} ({modelo_id})\n")
+        f.write(f"Químico Objetivo: {quimico}\n")
+        f.write(f"Genes Knockout: {', '.join(mejor['genes'])}\n")
+        f.write(f"Fitness Ajustado: {mejor['fitness']:.4f} mmol/gDW/h\n")
+        f.write(f"\nNota: Revisa la carpeta 'reportes/' para ver el mapa HTML interactivo generado.\n")
+
+    console.print(f"\n📁 [bold green]Reporte Maestro guardado en '{nombre_base}.txt'[/bold green]")
+    console.print("🏆 [bold green]¡Análisis Integral Completado con Éxito![/bold green]")
+
+# ==========================================
 # MENÚ PRINCIPAL
 # ==========================================
 def main():
     console.clear()
-    console.print(Panel.fit("[bold green]MetaboEngineer Pro[/bold green]\nHerramienta Profesional de Biología de Sistemas", style="bold green"))
+    console.print(Panel.fit("[bold green]MetaboEngineer Pro V4.0[/bold green]\nHerramienta Unificada de Biología de Sistemas", style="bold green"))
 
     console.print("\n[bold]Selecciona el organismo base:[/bold]")
     for key, val in ORGANISMOS.items():
         console.print(f"  {key}. {val['nombre']}")
 
     opcion = Prompt.ask("Opción", choices=list(ORGANISMOS.keys()), default="2")
-    modelo_id = Prompt.ask("Ingresa el ID del modelo (BiGG / BioModels / local)").strip() if opcion == "9" else ORGANISMOS[opcion]["id"]
 
-    try:
-        modelo, mensaje = cargar_modelo_universal(modelo_id)
-        console.print(f"✅ {mensaje} | {len(modelo.reactions)} reacciones.\n", style="bold green")
-    except Exception as e:
-        console.print(Panel(str(e), title="❌ Error de carga", border_style="red"))
-        return
+    # ✅ Manejo limpio de nombre_organismo (especialmente para opción 9)
+    if opcion == "9":
+        modelo_id = Prompt.ask("Ingresa el ID del modelo (BiGG / BioModels / local)").strip()
+        nombre_organismo = modelo_id
+    else:
+        modelo_id = ORGANISMOS[opcion]["id"]
+        nombre_organismo = ORGANISMOS[opcion]["nombre"]
+
+    with console.status(f"[bold yellow]Cargando modelo {modelo_id}...[/bold yellow]"):
+        try:
+            modelo, mensaje = cargar_modelo_universal(modelo_id)
+            console.print(f"✅ {mensaje} | {len(modelo.reactions)} reacciones.\n", style="bold green")
+        except Exception as e:
+            console.print(Panel(str(e), title="❌ Error de carga", border_style="red"))
+            return
 
     while True:
-        console.print("\n[bold]--- MENÚ ---[/bold]")
-        console.print("1. [cyan]FBA Básico[/cyan]")
+        console.print("\n[bold]--- 🧬 MENÚ DE HERRAMIENTAS (V4.0) ---[/bold]")
+        console.print("1. [cyan]Análisis de Flujos Básico (FBA)[/cyan]")
         console.print("2. [green]Diseño de Cepas por IA (Algoritmo Genético)[/green]")
         console.print("3. [magenta]Diseño por OptKnock (Acoplamiento de Crecimiento)[/magenta]")
         console.print("4. [yellow]Simulador de Evolución Dirigida (Optimizar Enzimas)[/yellow]")
-        console.print("5. [bold red]Salir[/bold red]")
+        console.print("5. [bold blue]Análisis Integral (Diseño + Termo + Cinetica + Mapa Visual)[/bold blue]")
+        console.print("6. [bold red]Salir[/bold red]")
 
-        op = Prompt.ask("\nSelecciona una opción", choices=["1", "2", "3", "4", "5"])
+        op = Prompt.ask("\nSelecciona una opción", choices=["1", "2", "3", "4", "5", "6"])
+
         if op == "1":
             sol = modelo.optimize()
             if sol.status == 'optimal':
                 console.print(f"✅ Crecimiento: [bold green]{sol.objective_value:.4f}[/bold green] h⁻¹")
+
         elif op == "2":
-            disenar_cepa_ia(modelo, ORGANISMOS.get(opcion, {}).get("nombre", modelo_id), modelo_id)
+            disenar_cepa_ia(modelo, nombre_organismo, modelo_id)
+
         elif op == "3":
-            optknock_algoritmo(modelo, ORGANISMOS.get(opcion, {}).get("nombre", modelo_id), modelo_id)
+            optknock_algoritmo(modelo, nombre_organismo, modelo_id)
+
         elif op == "4":
-            simulador_evolucion_dirigida(modelo, ORGANISMOS.get(opcion, {}).get("nombre", modelo_id), modelo_id)
+            simulador_evolucion_dirigida(modelo, nombre_organismo, modelo_id)
+
         elif op == "5":
+            analisis_integral(modelo, nombre_organismo, modelo_id)
+
+        elif op == "6":
+            console.print("👋 Saliendo. ¡Hasta luego!", style="bold blue")
             break
 
 if __name__ == "__main__":
