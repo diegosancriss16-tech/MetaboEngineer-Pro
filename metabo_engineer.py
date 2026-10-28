@@ -22,7 +22,6 @@ from rich.panel import Panel
 console = Console()
 
 # --- BASE DE DATOS CINÉTICA (Datos reales de E. coli extraídos de BRENDA) ---
-# Formato: 'ID_Reaccion': {'kcat': valor_en_s-1, 'Km': valor_en_mM, 'enzima': 'Nombre'}
 DB_CINETICA = {
     'PFK': {'kcat': 150.0, 'Km': 0.1, 'enzima': 'Fosfofructoquinasa'},
     'FBA': {'kcat': 45.0, 'Km': 0.5, 'enzima': 'Fructosa-bisfosfato aldolasa'},
@@ -51,7 +50,6 @@ COSTOS_PROTEICOS = {
 # TRADUCTOR DE GENES (UNIPROT) - 100% UNIVERSAL
 # ==========================================
 def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
-    """Consulta la API de UniProt para obtener el nombre real y la función del gen."""
     if not re.search(r'\d', gen_id):
         return gen_id, "Nombre común"
 
@@ -74,10 +72,6 @@ def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
 # CARGA UNIVERSAL DE MODELOS (CASCADA)
 # ==========================================
 def cargar_modelo_universal(modelo_id):
-    """
-    Busca un modelo en la carpeta local, BiGG y BioModels (vía COBRApy).
-    Si no lo encuentra, da instrucciones para repositorios externos.
-    """
     if modelo_id:
         modelo_id = modelo_id.strip()
 
@@ -188,7 +182,6 @@ def analizar_cinetica_enzimatica(modelo, quimico):
     tabla.add_column("Km (mM)", justify="right")
     tabla.add_column("Eficiencia (kcat/Km)", justify="right", style="green")
 
-    # Si el químico es cafeína, añadimos las reacciones inyectadas al análisis
     reacciones_a_analizar = ['PFK', 'FBA', 'GAPD', 'PYK', 'CS', 'ICDHyr']
     if quimico == 'EX_caft_e':
         reacciones_a_analizar.extend(['CAFT_RXN1', 'CAFT_RXN2'])
@@ -198,7 +191,6 @@ def analizar_cinetica_enzimatica(modelo, quimico):
             datos = DB_CINETICA[r_id]
             eficiencia = datos['kcat'] / datos['Km'] if datos['Km'] > 0 else 0
 
-            # Colores según la eficiencia
             if eficiencia > 500:
                 color_ef = "bold green"
                 texto_ef = f"[{color_ef}]{eficiencia:.1f} (Muy eficiente)[/{color_ef}]"
@@ -209,19 +201,12 @@ def analizar_cinetica_enzimatica(modelo, quimico):
                 color_ef = "red"
                 texto_ef = f"[{color_ef}]{eficiencia:.1f} (Cuello de botella)[/{color_ef}]"
 
-            tabla.add_row(
-                r_id,
-                datos['enzima'],
-                f"{datos['kcat']}",
-                f"{datos['Km']}",
-                texto_ef
-            )
+            tabla.add_row(r_id, datos['enzima'], f"{datos['kcat']}", f"{datos['Km']}", texto_ef)
         else:
             tabla.add_row(r_id, "No en BRENDA", "-", "-", "-")
 
     console.print(tabla)
 
-    # Advertencia sobre cuellos de botella
     console.print("\n💡 [bold]Interpretación Biológica:[/bold]")
     console.print("   - Las enzimas con baja eficiencia (kcat/Km < 100) son 'cuellos de botella'.")
     console.print("   - Si la IA sobreexpresara estas rutas, la célula colapsaría por acumulación de sustrato.")
@@ -323,15 +308,12 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id):
     console.print(f"\n🏆 [bold green]¡Diseño completado![/bold green]")
     console.print(f"Fitness: {mejor['fitness']:.4f}\n")
 
-    # --- TRADUCCIÓN DE GENES Y GENERACIÓN DE REPORTE ---
     console.print("[bold cyan]🔍 Traduciendo nombres de genes con UniProt...[/bold cyan]")
     tabla_genes = Table(title="Genes a apagar (Knockouts)")
     tabla_genes.add_column("ID (BiGG)", style="cyan")
     tabla_genes.add_column("Nombre Real", style="magenta")
     tabla_genes.add_column("Función Proteica", style="green")
 
-    # Detección del organismo para elegir el ID correcto de UniProt
-    # 83333 = E. coli, 196627 = C. glutamicum, 224308 = B. subtilis, 559292 = Levadura
     if "iYO844" in modelo_id:
         id_uniprot = "224308"
     elif "iCW773" in modelo_id:
@@ -349,7 +331,6 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id):
 
     console.print(tabla_genes)
 
-    # Guardar Reporte
     if not os.path.exists("reportes"): os.makedirs("reportes")
     fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
     nombre_base = f"reportes/cepa_lab_{modelo_id}_{quimico}_{fecha}"
@@ -371,17 +352,16 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id):
     console.print(f"\n📁 [bold green]Reporte para laboratorio guardado en:[/bold green] {nombre_base}.txt")
 
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
-    analizar_cinetica_enzimatica(modelo, quimico)  # <--- NUEVA LÍNEA
+    analizar_cinetica_enzimatica(modelo, quimico)
 
 # ==========================================
-# DISEÑO POR OPTKNOCK HÍBRIDO (AG + RATIO DE ACOPLAMIENTO)
+# DISEÑO POR OPTKNOCK HÍBRIDO
 # ==========================================
 def optknock_algoritmo(modelo, nombre_organismo, modelo_id):
     console.print(f"\n[bold magenta]👑 Iniciando Diseño por OptKnock Híbrido...[/bold magenta]")
 
     quimico = Prompt.ask("¿Qué químico quieres producir? (ej. EX_succ_e, EX_caft_e)", default="EX_succ_e").strip()
 
-    # --- NUEVO: Lógica de Biología Sintética ---
     if quimico not in modelo.reactions:
         console.print(f"\n[bold red]⚠️ El químico '{quimico}' no es nativo.[/bold red]")
         if quimico == "EX_caft_e":
@@ -392,7 +372,6 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id):
                 return
         else:
             console.print("No hay ruta pre-programada.", style="bold red"); return
-    # -------------------------------------------
 
     max_mutaciones = IntPrompt.ask("¿Cuántos genes apagar simultáneamente?", default=3)
     generaciones = IntPrompt.ask("Número de generaciones de la IA", default=15)
@@ -456,12 +435,92 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id):
         console.print(f"Ratio de Acoplamiento: [bold yellow]{mejor['fitness']:.4f}[/bold yellow] (mmol químico / mmol biomasa)")
         console.print("💡 La célula crece de forma óptima cuando produce tu químico.")
 
-        # Añadimos el Análisis Profundo al final de OptKnock también
         analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
-        analizar_cinetica_enzimatica(modelo, quimico)  # <--- NUEVA LÍNEA
+        analizar_cinetica_enzimatica(modelo, quimico)
     else:
         console.print("\n❌ No se encontró acoplamiento estricto.", style="bold red")
         console.print("💡 Esto es normal en metabolismos flexibles. Prueba con el Algoritmo Genético (Opción 2).")
+
+# ==========================================
+# SIMULADOR DE EVOLUCIÓN DIRIGIDA (CON PRUEBA DE CUELLO FORZADO)
+# ==========================================
+def simulador_evolucion_dirigida(modelo, nombre_organismo, modelo_id):
+    console.print(f"\n[bold yellow]🧬 Simulador de Evolución Dirigida (Optimización Cinética)...[/bold yellow]")
+    console.print("Este módulo simula la mutación de una enzima para aumentar su velocidad (kcat) y evalúa el impacto en la producción.\n")
+
+    quimico = Prompt.ask("¿Qué químico quieres producir? (ej. EX_caft_e)", default="EX_caft_e")
+
+    # Inyectar ruta si es necesario
+    if quimico not in modelo.reactions:
+        if quimico == "EX_caft_e":
+            if Prompt.ask("¿Inyectar ruta de la planta de café?", choices=["S", "N"], default="S").upper() == "S":
+                modelo, quimico = inyectar_ruta_heterologa(modelo, quimico)
+                if modelo is None: return
+            else:
+                return
+        else:
+            console.print("❌ Químico no válido.", style="bold red"); return
+
+    # Identificar cuellos de botella
+    cuellos_de_botella = []
+    for r_id, datos in DB_CINETICA.items():
+        if r_id in modelo.reactions:
+            eficiencia = datos['kcat'] / datos['Km'] if datos['Km'] > 0 else 0
+            if eficiencia < 200:
+                cuellos_de_botella.append(r_id)
+
+    if not cuellos_de_botella:
+        console.print("No se encontraron cuellos de botella en la ruta actual.", style="bold green")
+        return
+
+    console.print(f"Cuellos de botella detectados (Eficiencia < 200): [bold red]{', '.join(cuellos_de_botella)}[/bold red]")
+    enzima_objetivo = Prompt.ask("¿Qué enzima quieres evolucionar?", choices=cuellos_de_botella, default=cuellos_de_botella[0])
+
+    factor_mutacion = IntPrompt.ask(f"¿Cuántas veces más rápida quieres hacer la enzima {enzima_objetivo}?", default=10)
+
+    # FORZAR CUELLO DE BOTELLA PARA PRUEBA (Límite bajo artificial)
+    modelo.reactions.get_by_id(enzima_objetivo).bounds = (0, 5.0)  # Límite de 5
+    console.print(f"[yellow]⚠️ Prueba: Límite artificial de 5.0 impuesto a {enzima_objetivo} para simular una enzima débil.[/yellow]")
+
+    # --- SIMULACIÓN ANTES DE LA MUTACIÓN ---
+    modelo_original = modelo.copy()
+    gen_biomasa = [r.id for r in modelo_original.reactions if "biomass" in r.id.lower()][0]
+    modelo_original.reactions.get_by_id(quimico).bounds = (0, 1000.0)
+    modelo_original.objective = quimico
+    sol_original = modelo_original.optimize()
+    prod_original = sol_original.objective_value if sol_original.status == 'optimal' else 0.0
+
+    # --- SIMULACIÓN DESPUÉS DE LA MUTACIÓN ---
+    console.print(f"\nMutando {enzima_objetivo} (kcat x{factor_mutacion})...")
+    modelo_mutado = modelo.copy()
+    modelo_mutado.reactions.get_by_id(quimico).bounds = (0, 1000.0)
+
+    rxn = modelo_mutado.reactions.get_by_id(enzima_objetivo)
+    nuevo_limite = rxn.upper_bound * factor_mutacion
+    rxn.bounds = (rxn.lower_bound, max(1000.0, nuevo_limite))
+
+    modelo_mutado.objective = quimico
+    sol_mutado = modelo_mutado.optimize()
+    prod_mutada = sol_mutado.objective_value if sol_mutado.status == 'optimal' else 0.0
+
+    # --- RESULTADOS ---
+    tabla = Table(title=f"Resultados de Evolución Dirigida: {enzima_objetivo}")
+    tabla.add_column("Estado", style="cyan")
+    tabla.add_column("Producción (mmol/gDW/h)", style="magenta")
+    tabla.add_column("Mejora", style="green")
+
+    mejora = ((prod_mutada - prod_original) / prod_original * 100) if prod_original > 0 else 0
+
+    tabla.add_row("Cepa Original (Silvestre)", f"{prod_original:.4f}", "-")
+    tabla.add_row(f"Cepa Mutada (kcat x{factor_mutacion})", f"{prod_mutada:.4f}", f"[bold green]+{mejora:.1f}%[/bold green]" if mejora > 0 else f"{mejora:.1f}%")
+
+    console.print(tabla)
+
+    console.print("\n💡 [bold]Conclusión Biológica:[/bold]")
+    if mejora > 1:
+        console.print(f"   La evolución dirigida de {enzima_objetivo} desbloquea el flujo metabólico. ¡Vale la pena hacer esta mutación en el laboratorio!")
+    else:
+        console.print(f"   Mutar {enzima_objetivo} no mejora la producción. El verdadero cuello de botella está en otra parte de la ruta.")
 
 # ==========================================
 # MENÚ PRINCIPAL
@@ -489,9 +548,10 @@ def main():
         console.print("1. [cyan]FBA Básico[/cyan]")
         console.print("2. [green]Diseño de Cepas por IA (Algoritmo Genético)[/green]")
         console.print("3. [magenta]Diseño por OptKnock (Acoplamiento de Crecimiento)[/magenta]")
-        console.print("4. [bold red]Salir[/bold red]")
+        console.print("4. [yellow]Simulador de Evolución Dirigida (Optimizar Enzimas)[/yellow]")
+        console.print("5. [bold red]Salir[/bold red]")
 
-        op = Prompt.ask("\nSelecciona una opción", choices=["1", "2", "3", "4"])
+        op = Prompt.ask("\nSelecciona una opción", choices=["1", "2", "3", "4", "5"])
         if op == "1":
             sol = modelo.optimize()
             if sol.status == 'optimal':
@@ -501,6 +561,8 @@ def main():
         elif op == "3":
             optknock_algoritmo(modelo, ORGANISMOS.get(opcion, {}).get("nombre", modelo_id), modelo_id)
         elif op == "4":
+            simulador_evolucion_dirigida(modelo, ORGANISMOS.get(opcion, {}).get("nombre", modelo_id), modelo_id)
+        elif op == "5":
             break
 
 if __name__ == "__main__":
