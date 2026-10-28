@@ -1,0 +1,13 @@
+# Entorno virtual
+venv/
+__pycache__/
+
+# Modelos gigantes (descargables)
+modelos/
+
+# Reportes generados
+reportes/
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
