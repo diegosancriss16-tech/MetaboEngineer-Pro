@@ -13,6 +13,7 @@ import re
 import json
 import hashlib
 import logging
+import pandas as pd
 from requests.exceptions import RequestException
 from datetime import datetime
 from rich.console import Console
@@ -53,12 +54,13 @@ COSTOS_PROTEICOS = {
     "EX_succ_e": 0.1, "EX_etoh_e": 0.2, "default": 0.3
 }
 
+_RUTA_HISTORIAL_CSV = "reportes/historial.csv"
+
 
 # ==========================================
 # LOGGING A ARCHIVO
 # ==========================================
 def setup_logger():
-    """Configura logging a archivo en logs/. Devuelve la ruta del log."""
     if not os.path.exists("logs"):
         os.makedirs("logs")
     log_file = f"logs/run_{datetime.now():%Y%m%d_%H%M%S}.log"
@@ -68,7 +70,7 @@ def setup_logger():
         handlers=[logging.FileHandler(log_file, encoding="utf-8")]
     )
     logging.info("=" * 60)
-    logging.info("MetaboEngineer Pro V5.4 - Session started")
+    logging.info("MetaboEngineer Pro V5.5 - Session started")
     logging.info("=" * 60)
     return log_file
 
@@ -77,7 +79,6 @@ def setup_logger():
 # SEED REPRODUCIBLE
 # ==========================================
 def preguntar_seed():
-    """Pregunta al usuario por la semilla aleatoria. Enter = aleatoria."""
     try:
         entrada = Prompt.ask("Semilla aleatoria (Enter = aleatoria)", default="").strip()
         if entrada == "":
@@ -100,11 +101,11 @@ def preguntar_seed():
 def get_organism_id(modelo_id: str) -> str:
     if not modelo_id:
         return "83333"
-    if "iYO844" in modelo_id: return "224308"    # B. subtilis
-    if "iCW773" in modelo_id: return "196627"    # C. glutamicum
-    if "iMM904" in modelo_id: return "559292"    # S. cerevisiae
-    if "iEK1008" in modelo_id: return "1773"     # M. tuberculosis
-    return "83333"                                # E. coli por defecto
+    if "iYO844" in modelo_id: return "224308"
+    if "iCW773" in modelo_id: return "196627"
+    if "iMM904" in modelo_id: return "559292"
+    if "iEK1008" in modelo_id: return "1773"
+    return "83333"
 
 
 # ==========================================
@@ -114,7 +115,6 @@ _RUTA_CACHE_UNIPROT = "cache_uniprot.json"
 
 
 def _cargar_cache_uniprot():
-    """Carga cache de traducciones UniProt desde disco."""
     if not os.path.exists(_RUTA_CACHE_UNIPROT):
         return {}
     try:
@@ -125,7 +125,6 @@ def _cargar_cache_uniprot():
 
 
 def _guardar_cache_uniprot(cache):
-    """Guardado atomico del cache."""
     tmp = _RUTA_CACHE_UNIPROT + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cache, f, indent=2, ensure_ascii=False)
@@ -133,7 +132,6 @@ def _guardar_cache_uniprot(cache):
 
 
 def limpiar_cache_uniprot():
-    """Borra el cache de UniProt."""
     if os.path.exists(_RUTA_CACHE_UNIPROT):
         os.remove(_RUTA_CACHE_UNIPROT)
         console.print(f"[green]OK[/green] Cache UniProt eliminado.")
@@ -146,21 +144,15 @@ def limpiar_cache_uniprot():
 # TRADUCTOR DE GENES (UNIPROT) - CON CACHE
 # ==========================================
 def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
-    """
-    Consulta UniProt con cache offline.
-    Primero busca en cache; si no esta, consulta la API y guarda.
-    """
     if not re.search(r'\d', gen_id):
         return gen_id, "Nombre comun"
 
-    # --- CACHE HIT ---
     cache = _cargar_cache_uniprot()
     clave = f"{organismo_id_uniprot}:{gen_id}"
     if clave in cache:
         logging.debug(f"UniProt cache HIT: {clave}")
         return tuple(cache[clave])
 
-    # --- CACHE MISS: consultar API ---
     logging.debug(f"UniProt cache MISS: {clave} -> consultando API")
     url = (f"https://rest.uniprot.org/uniprotkb/search?"
            f"query=organism_id:{organismo_id_uniprot}+AND+gene_exact:{gen_id}"
@@ -177,13 +169,124 @@ def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
                                     .get('recommendedName', {})
                                     .get('fullName', {})
                                     .get('value', 'Funcion desconocida'))
-                # Guardar en cache
                 cache[clave] = [nombre_gen, nombre_proteina]
                 _guardar_cache_uniprot(cache)
                 return nombre_gen, nombre_proteina
     except Exception as e:
         logging.warning(f"UniProt error para {gen_id}: {e}")
     return gen_id, "No encontrado en UniProt"
+
+
+# ==========================================
+# EXPORTACION A JSON/CSV
+# ==========================================
+def _exportar_resultado_json(modelo_id, quimico, metodo, genes, fitness, seed, parametros_extra=None):
+    """Exporta una corrida como JSON individual + append a CSV historial."""
+    if not os.path.exists("reportes"):
+        os.makedirs("reportes")
+
+    fecha = datetime.now()
+    timestamp = fecha.strftime("%Y%m%d_%H%M%S")
+
+    # JSON individual
+    resultado = {
+        "fecha": fecha.isoformat(),
+        "modelo": modelo_id,
+        "quimico": quimico,
+        "metodo": metodo,
+        "fitness": round(fitness, 6),
+        "genes_knockout": list(genes),
+        "num_genes": len(genes),
+        "seed": seed,
+        "parametros": parametros_extra or {},
+    }
+
+    ruta_json = f"reportes/{metodo}_{modelo_id}_{quimico}_{timestamp}.json"
+    with open(ruta_json, "w", encoding="utf-8") as f:
+        json.dump(resultado, f, indent=2, ensure_ascii=False)
+
+    # Append a CSV historial
+    fila = {
+        "fecha": fecha.strftime("%Y-%m-%d %H:%M:%S"),
+        "modelo": modelo_id,
+        "quimico": quimico,
+        "metodo": metodo,
+        "fitness": round(fitness, 6),
+        "num_genes": len(genes),
+        "genes": ";".join(genes),
+        "seed": seed,
+    }
+
+    existe = os.path.exists(_RUTA_HISTORIAL_CSV)
+    df = pd.DataFrame([fila])
+    df.to_csv(_RUTA_HISTORIAL_CSV, mode="a", header=not existe, index=False)
+
+    console.print(f"[green]OK[/green] JSON: {ruta_json}")
+    console.print(f"[green]OK[/green] CSV: {_RUTA_HISTORIAL_CSV} (append)")
+    logging.info(f"Resultado exportado: {ruta_json} + {_RUTA_HISTORIAL_CSV}")
+
+    return ruta_json
+
+
+def mostrar_historial():
+    """Muestra el historial acumulativo de corridas como tabla."""
+    if not os.path.exists(_RUTA_HISTORIAL_CSV):
+        console.print("[yellow]WARN[/yellow] No hay historial aun. Ejecuta un analisis primero.")
+        return
+
+    try:
+        df = pd.read_csv(_RUTA_HISTORIAL_CSV)
+    except Exception as e:
+        console.print(f"[red]ERROR[/red] No se pudo leer el historial: {e}")
+        return
+
+    if df.empty:
+        console.print("[yellow]WARN[/yellow] El historial esta vacio.")
+        return
+
+    tabla = Table(title=f"Historial de corridas ({len(df)} total)")
+    tabla.add_column("Fecha", style="dim")
+    tabla.add_column("Modelo", style="cyan")
+    tabla.add_column("Quimico", style="magenta")
+    tabla.add_column("Metodo", style="yellow")
+    tabla.add_column("Fitness", style="green", justify="right")
+    tabla.add_column("Genes", justify="right")
+    tabla.add_column("Seed", justify="right")
+
+    for _, row in df.tail(20).iterrows():
+        tabla.add_row(
+            str(row["fecha"]),
+            str(row["modelo"]),
+            str(row["quimico"]),
+            str(row["metodo"]),
+            f"{row['fitness']:.4f}",
+            str(int(row["num_genes"])),
+            str(row["seed"]),
+        )
+
+    console.print(tabla)
+
+    # Resumen estadistico
+    if len(df) >= 2:
+        console.print(f"\n[bold cyan]Resumen estadistico ({len(df)} corridas):[/bold cyan]")
+        stats = df.groupby("metodo")["fitness"].agg(["count", "mean", "max", "min"]).round(4)
+        tabla_stats = Table(title="Fitness por metodo")
+        tabla_stats.add_column("Metodo", style="yellow")
+        tabla_stats.add_column("Corridas", justify="right")
+        tabla_stats.add_column("Media", justify="right", style="cyan")
+        tabla_stats.add_column("Max", justify="right", style="green")
+        tabla_stats.add_column("Min", justify="right", style="red")
+        for metodo, row in stats.iterrows():
+            tabla_stats.add_row(
+                str(metodo),
+                str(int(row["count"])),
+                f"{row['mean']:.4f}",
+                f"{row['max']:.4f}",
+                f"{row['min']:.4f}",
+            )
+        console.print(tabla_stats)
+
+    console.print(f"\n[dim]Mostrando ultimas {min(20, len(df))} de {len(df)}. Archivo: {_RUTA_HISTORIAL_CSV}[/dim]")
 
 
 # ==========================================
@@ -326,7 +429,7 @@ def _sincronizar_indice():
 
 
 # ==========================================
-# CARGA UNIVERSAL (ROBUSTA + INDEXADA + DEDUPLICADA)
+# CARGA UNIVERSAL
 # ==========================================
 def cargar_modelo_universal(modelo_id):
     if not modelo_id or not isinstance(modelo_id, str) or not modelo_id.strip():
@@ -342,7 +445,6 @@ def cargar_modelo_universal(modelo_id):
     ruta_local = f"modelos/{modelo_id}.xml"
     indice = _cargar_indice()
 
-    # PRIORIDAD 1: disco local
     if os.path.exists(ruta_local):
         if modelo_id in indice["modelos"]:
             sha_esperado = indice["modelos"][modelo_id].get("sha256")
@@ -365,7 +467,6 @@ def cargar_modelo_universal(modelo_id):
             logging.info(f"Modelo cargado desde disco (sin indice previo): {modelo_id}")
             return modelo, f"Modelo '{modelo_id}' cargado desde disco local (nuevo indexado)."
 
-    # PRIORIDAD 2: cobrapy nativo
     bigg_ok = _bigg_online()
     if not bigg_ok:
         console.print("[yellow]WARN[/yellow] BiGG no responde. Probando espejos directos...")
@@ -384,7 +485,6 @@ def cargar_modelo_universal(modelo_id):
         console.print("[cyan]INFO[/cyan] Probando descarga directa con headers de navegador...")
         logging.warning(f"load_model fallo para {modelo_id}: {e_orig}")
 
-    # PRIORIDAD 3: descarga directa
     errores = []
     for url in _urls_candidatas(modelo_id):
         ok, detalle = _descargar_xml(url, ruta_local, max_intentos=2, timeout=25)
@@ -399,7 +499,6 @@ def cargar_modelo_universal(modelo_id):
         else:
             errores.append(f"{url}\n      {detalle}")
 
-    # PRIORIDAD 4: error claro
     detalle = "\n".join(f"  - {e}" for e in errores)
     ruta_abs = os.path.abspath(ruta_local)
     logging.error(f"Fallo total al cargar {modelo_id}: {detalle}")
@@ -457,7 +556,7 @@ def inyectar_ruta_heterologa(modelo, quimico):
 
 
 # ==========================================
-# ANALISIS TERMODINAMICO UNIVERSAL DE LA CEPA
+# ANALISIS TERMODINAMICO
 # ==========================================
 def analizar_termodinamica_cepa(modelo, quimico, genes_knockout):
     if not MODULOS_EXTERNOS_DISPONIBLES:
@@ -524,7 +623,7 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
 
 
 # ==========================================
-# DISENO DE CEPA POR IA (con seed reproducible)
+# DISENO DE CEPA POR IA
 # ==========================================
 def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None:
@@ -600,27 +699,27 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
         except Exception as e:
             console.print(f"[yellow]WARN[/yellow] Reporte fallo: {e}")
             logging.warning(f"Reporte fallo: {e}")
-    else:
-        if not os.path.exists("reportes"): os.makedirs("reportes")
-        fecha = datetime.now().strftime("%Y%m%d_%H%M%S")
-        nombre_base = f"reportes/cepa_lab_{modelo_id}_{quimico}_{fecha}"
-        with open(f"{nombre_base}.txt", "w", encoding="utf-8") as f:
-            f.write("REPORTE DE INGENIERIA METABOLICA\n")
-            f.write(f"Fecha: {datetime.now().isoformat()}\n")
-            f.write(f"Organismo: {nombre_organismo}\n")
-            f.write(f"Quimico: {quimico}\n")
-            f.write(f"Fitness: {mejor['fitness']:.4f} mmol/gDW/h\n")
-            f.write(f"Seed: {seed}\n")
-            for rg in reporte_genes:
-                f.write(f"  - {rg}\n")
-        console.print(f"[green]OK[/green] Reporte basico guardado: {nombre_base}.txt")
-        logging.info(f"Reporte basico guardado: {nombre_base}.txt")
+
+    # EXPORTAR JSON + CSV
+    try:
+        _exportar_resultado_json(
+            modelo_id=modelo_id,
+            quimico=quimico,
+            metodo="ia",
+            genes=mejor["genes"],
+            fitness=mejor["fitness"],
+            seed=seed,
+            parametros_extra={"generaciones": gens, "poblacion": pop_size, "mutaciones": mutaciones}
+        )
+    except Exception as e:
+        console.print(f"[yellow]WARN[/yellow] Exportacion JSON/CSV fallo: {e}")
+        logging.warning(f"Exportacion fallo: {e}")
 
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
 
 
 # ==========================================
-# DISENO POR OPTKNOCK (con seed reproducible)
+# DISENO POR OPTKNOCK
 # ==========================================
 def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None:
@@ -701,6 +800,22 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
         console.print(f"Ratio de Acoplamiento: [bold yellow]{mejor['fitness']:.4f}[/bold yellow] mmol quimico / mmol biomasa")
         console.print("La celula crece de forma optima cuando produce el quimico.")
         logging.info(f"OptKnock completado: ratio={mejor['fitness']:.4f}, genes={mejor['genes']}")
+
+        # EXPORTAR JSON + CSV
+        try:
+            _exportar_resultado_json(
+                modelo_id=modelo_id,
+                quimico=quimico,
+                metodo="optknock",
+                genes=mejor["genes"],
+                fitness=mejor["fitness"],
+                seed=seed,
+                parametros_extra={"max_mutaciones": max_mutaciones, "generaciones": generaciones, "poblacion": pop_size}
+            )
+        except Exception as e:
+            console.print(f"[yellow]WARN[/yellow] Exportacion JSON/CSV fallo: {e}")
+            logging.warning(f"Exportacion fallo: {e}")
+
         analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
     else:
         console.print("\n[red]ERROR[/red] No se encontro acoplamiento estricto.")
@@ -709,7 +824,7 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
 
 
 # ==========================================
-# ANALISIS INTEGRAL (con seed reproducible)
+# ANALISIS INTEGRAL
 # ==========================================
 def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None:
@@ -786,6 +901,21 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
             console.print(f"[yellow]WARN[/yellow] Reporte fallo: {e}")
             logging.warning(f"Reporte fallo: {e}")
 
+    # EXPORTAR JSON + CSV
+    try:
+        _exportar_resultado_json(
+            modelo_id=modelo_id,
+            quimico=quimico,
+            metodo="integral",
+            genes=mejor["genes"],
+            fitness=mejor["fitness"],
+            seed=seed,
+            parametros_extra={"generaciones": gens, "poblacion": pop_size, "mutaciones": mutaciones}
+        )
+    except Exception as e:
+        console.print(f"[yellow]WARN[/yellow] Exportacion JSON/CSV fallo: {e}")
+        logging.warning(f"Exportacion fallo: {e}")
+
     console.print("\n[green]OK[/green] Analisis Integral completado.")
 
 
@@ -795,7 +925,7 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
 def main():
     console.clear()
     console.print(Panel.fit(
-        "[bold green]MetaboEngineer Pro V5.4[/bold green]\n"
+        "[bold green]MetaboEngineer Pro V5.5[/bold green]\n"
         "Suite Universal de Biologia de Sistemas",
         style="bold green"
     ))
@@ -815,7 +945,6 @@ def main():
         console.print("\n[bold cyan]Modelos ya en cache local (listos sin internet):[/bold cyan]")
         for i, (mid, meta) in enumerate(cacheados.items(), start=1):
             alias = f" (alias de {meta['alias_de']})" if meta.get('alias_de') else ""
-            # FIX: escapar corchetes para que Rich no los interprete como markup
             console.print(f"  \\[c{i}] {mid} — {meta['reacciones']} reacciones, "
                           f"{meta['genes']} genes, {meta['fecha'][:10]}{alias}")
             claves_cache.append(f"c{i}")
@@ -855,7 +984,6 @@ def main():
             modelo_id = ORGANISMOS[opcion]["id"]
             nombre_organismo = ORGANISMOS[opcion]["nombre"]
 
-    # Pedir seed ANTES de cargar el modelo
     seed = preguntar_seed()
     logging.info(f"Organismo seleccionado: {modelo_id}, seed={seed}")
 
@@ -869,16 +997,17 @@ def main():
             return
 
     while True:
-        console.print("\n[bold]--- MENU PRINCIPAL (V5.4) ---[/bold]")
+        console.print("\n[bold]--- MENU PRINCIPAL (V5.5) ---[/bold]")
         console.print("1. [cyan]Analisis de Flujos Basico (FBA)[/cyan]")
-        console.print("2. [green]Diseno de Cepas por IA (+ Reporte Cientifico)[/green]")
+        console.print("2. [green]Diseno de Cepas por IA (+ Reporte + JSON/CSV)[/green]")
         console.print("3. [magenta]Diseno por OptKnock (Acoplamiento de Crecimiento)[/magenta]")
         console.print("4. [bold blue]Analisis Integral (Diseno + Termo + Mapa + Reporte)[/bold blue]")
-        console.print("5. [bold yellow]Limpiar cache UniProt[/bold yellow]")
-        console.print("6. [bold red]Salir[/bold red]")
+        console.print("5. [bold cyan]Ver historial de corridas (CSV)[/bold cyan]")
+        console.print("6. [bold yellow]Limpiar cache UniProt[/bold yellow]")
+        console.print("7. [bold red]Salir[/bold red]")
 
         try:
-            op = Prompt.ask("\nSelecciona una opcion", choices=["1", "2", "3", "4", "5", "6"])
+            op = Prompt.ask("\nSelecciona una opcion", choices=["1", "2", "3", "4", "5", "6", "7"])
         except KeyboardInterrupt:
             console.print("\n[yellow]INFO[/yellow] Saliendo.")
             break
@@ -895,8 +1024,10 @@ def main():
         elif op == "4":
             analisis_integral(modelo, nombre_organismo, modelo_id, seed=seed)
         elif op == "5":
-            limpiar_cache_uniprot()
+            mostrar_historial()
         elif op == "6":
+            limpiar_cache_uniprot()
+        elif op == "7":
             console.print("Saliendo. Hasta luego.")
             logging.info("Session ended")
             break

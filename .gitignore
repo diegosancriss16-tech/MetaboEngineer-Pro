@@ -94,3 +94,7 @@ descargas/
 *~
 # Cache de UniProt (local, no compartir)
 cache_uniprot.json
+
+# Historial de corridas (local, no compartir)
+reportes/historial.csv
+reportes/*.json
