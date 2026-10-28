@@ -14,8 +14,9 @@ jobs:
 
     strategy:
       fail-fast: false
+      # Dejamos solo 3.10 y 3.11 (Python 3.12 da problemas con equilibrator-api)
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11"]
 
     steps:
       - name: Checkout codigo
