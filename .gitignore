@@ -98,3 +98,7 @@ cache_uniprot.json
 # Historial de corridas (local, no compartir)
 reportes/historial.csv
 reportes/*.json
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
