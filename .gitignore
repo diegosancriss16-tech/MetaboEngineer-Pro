@@ -1,7 +1,94 @@
+# =============================================
+# MetaboEngineer Pro - Exclusiones de Git
+# =============================================
+
+# --- Entornos virtuales ---
 venv/
+env/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# --- Python cache ---
 __pycache__/
-modelos/
-reportes/
-biblioteca/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Testing / coverage ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# --- Jupyter (si usas notebooks) ---
+.ipynb_checkpoints/
+
+# --- IDE / Editores ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
+
+# --- Modelos descargados (caché local, no compartir) ---
+# Descomenta si NO quieres compartir los modelos en el repo
+# (recomendado: no compartirlos, cada usuario descarga los suyos)
+modelos/*.xml
+modelos/_index.json
+
+# Mantener el .gitkeep para que la carpeta exista en el repo
+!modelos/.gitkeep
+
+# --- Reportes generados (son salidas del usuario, no del repo) ---
+reportes/*.md
+reportes/*.html
+reportes/*.txt
+reportes/*.json
+reportes/*.csv
+reportes/*.png
+
+# Mantener el .gitkeep
+!reportes/.gitkeep
+
+# --- Logs ---
+logs/
+*.log
+
+# --- Variables de entorno ---
+.env
+.env.local
+*.env
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+
+# --- BiGG / descargas temporales ---
+*.tmp
+*.temp
+descargas/
+
+# --- OS ---
+*.bak
+*~
