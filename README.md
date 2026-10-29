@@ -373,7 +373,7 @@ Si usas MetaboEngineer Pro en una publicación, cita:
 @software{metaboengineer2025,
   author  = {San Miguel, Diego},
   title   = {MetaboEngineer Pro: A Suite for Metabolic Engineering and Synthetic Biology},
-  year    = {2025},
+  year    = {2026},
   version = {5.2},
   url     = {https://github.com/<Diegosacris>/MetaboEngineer-Pro}
 }
