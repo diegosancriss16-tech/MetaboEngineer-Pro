@@ -15,7 +15,6 @@ console = Console()
 
 # NOTA DE DISENO: NO hay datos hardcodeados de ningun organismo.
 # La cinetica (kcat/Km) se obtendria de BRENDA, que requiere API autenticada.
-# Por eso el reporte solo incluye cinetica si el usuario la aporta por separado.
 
 def get_organism_id(modelo_id: str) -> str:
     """Taxon ID de UniProt segun modelo. Universal."""
@@ -28,13 +27,11 @@ def get_organism_id(modelo_id: str) -> str:
     return "83333"
 
 def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
-    """
-    Consulta UniProt + Rhea. Universal: si el gen no tiene digitos, asume nombre comun.
-    """
+    """Consulta UniProt + Rhea. Universal: si el gen no tiene digitos, asume nombre comun."""
     if not re.search(r'\d', gen_id):
         return gen_id, "Nombre comun", "N/A"
 
-    # PARCHE: Busca por gene_exact o locus_tag
+    # Busca por gene_exact o locus_tag
     url = (f"https://rest.uniprot.org/uniprotkb/search?"
            f"query=organism_id:{organism_id}+AND+(gene_exact:{gen_id}+OR+locus_tag:{gen_id})"
            f"&fields=gene_names,protein_name,xref_rhea&format=json")
@@ -56,9 +53,7 @@ def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
     return gen_id, "No encontrado", "N/A"
 
 def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness):
-    """
-    Genera un reporte cientifico .md universal (sin datos hardcodeados de ningun organismo).
-    """
+    """Genera un reporte cientifico .md universal."""
     console.print(f"\n[cyan]INFO[/cyan] Generando Reporte Cientifico...")
 
     organism_id = get_organism_id(modelo_id)
@@ -105,7 +100,22 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
 
         cc = ComponentContribution()
         cc.p_h = Q_(7.0); cc.p_mg = Q_(3.0); cc.ionic_strength = Q_("0.1 M")
-        for r_id in [r.id for r in modelo.reactions if not r.id.startswith("EX_")][:10]:
+        
+        # MEJORA: Analizar la reaccion objetivo y las que se bloquearon
+        reacciones_a_probar = []
+        if quimico in modelo.reactions:
+            reacciones_a_probar.append(quimico)
+        for g in mejor_genes:
+            if g in modelo.genes:
+                for rxn in modelo.genes.get_by_id(g).reactions:
+                    if rxn.id not in reacciones_a_probar:
+                        reacciones_a_probar.append(rxn.id)
+
+        for r_id in reacciones_a_probar[:10]:
+            # FILTRO: Ignorar sintéticos
+            if r_id.startswith("CAFT") or r_id.startswith("XAN") or r_id.startswith("EX_caft"):
+                f.write(f"| `{r_id}` | N/A (Sintetico) | N/A |\n")
+                continue
             try:
                 formula = construir_reaccion(modelo, modelo.reactions.get_by_id(r_id))
                 dg = cc.physiological_dg_prime(cc.parse_reaction_formula(formula)).value.magnitude
@@ -114,7 +124,6 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
                 pass
 
         f.write("\n---\n")
-        # PARCHE: Version actualizada a V5.7
-        f.write("*Generado automaticamente por MetaboEngineer Pro V5.7 - Universal*\n")
+        f.write("*Generado automaticamente por MetaboEngineer Pro V5.8 - Universal*\n")
 
     console.print(f"[green]OK[/green] Reporte guardado: [cyan]{nombre_archivo}[/cyan]")

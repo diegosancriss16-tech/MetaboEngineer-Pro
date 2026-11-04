@@ -9,7 +9,6 @@ from rich.table import Table
 
 console = Console()
 
-
 def construir_reaccion(modelo, reaccion):
     """Construye la formula usando anotaciones de KEGG o IDs de BiGG."""
     lado_izquierdo = []
@@ -41,7 +40,6 @@ def construir_reaccion(modelo, reaccion):
     der_str = " + ".join(lado_derecho) if lado_derecho else "bigg:h2o_c"
     return f"{izq_str} = {der_str}"
 
-
 def analizar_termodinamica_universal(modelo, reacciones_ids):
     console.print(f"\n[cyan]INFO[/cyan] Termodinamica Universal (BiGG + KEGG + eQuilibrator)\n")
 
@@ -61,6 +59,12 @@ def analizar_termodinamica_universal(modelo, reacciones_ids):
             continue
 
         reaccion = modelo.reactions.get_by_id(r_id)
+        
+        # FILTRO: Ignorar reacciones sintéticas que eQuilibrator no conoce
+        if r_id.startswith("CAFT") or r_id.startswith("XAN") or r_id.startswith("EX_caft"):
+            tabla.add_row(r_id, "Metabolito Sintetico", "N/A", "N/A")
+            continue
+
         formula = construir_reaccion(modelo, reaccion)
 
         try:
