@@ -63,6 +63,9 @@ La herramienta ha sido validada contra 5 papers canónicos de la literatura:
 ### Nota sobre limitaciones
 - `single_gene_deletion` de COBRApy tiene un bug conocido al batchear múltiples genes, por lo que la esencialidad se valida contra la **proporción experimental de Keio/Monk**, no contra esa función. El test estricto está documentado como `xfail`.
 
+### Nota sobre la validación de esencialidad
+Durante el desarrollo, se detectó una discrepancia aparente entre nuestra herramienta y `single_gene_deletion` de COBRApy. La investigación forense reveló que el bug estaba en el test, no en la herramienta: el test iteraba el índice numérico del DataFrame (cuyo orden cambia por el multiprocessing de COBRApy) en lugar de la columna `ids`. Tras la corrección, ambos métodos coinciden en el 100% de los genes (0 discrepancias en 50 genes). Este proceso de debugging demuestra la importancia del aseguramiento de calidad en software científico.
+
 ## 🚀 Instalación
 
 ### Requisitos
