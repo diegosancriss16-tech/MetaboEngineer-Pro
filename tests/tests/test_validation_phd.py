@@ -1,96 +1,102 @@
-"""
-Pruebas de Validación Nivel PhD - Fase 1 (A2, C5, C7)
-Basado en las recomendaciones del peer review.
-"""
 import pytest
 import cobra
+import random
 import metabo_engineer as me
 
-BIO = "Biomass_Ecoli_core"
+BIO_TEXTBOOK = "Biomass_Ecoli_core"
 
 @pytest.fixture(scope="module")
 def textbook():
     modelo, _ = me.cargar_modelo_universal("textbook")
     return modelo
 
-# =====================================================================
-# A2. LÍNEA BASE IDÉNTICA A COBRAPY PURO
-# =====================================================================
 class TestLineaBase:
     def test_crecimiento_WT_coincide_con_cobrapy(self, textbook):
-        """El crecimiento del WT debe ser exactamente igual a COBRApy puro."""
-        # Nuestro orquestador
-        sol_orquestador = textbook.slim_optimize()
-        
-        # COBRApy puro (copiando el modelo de nuevo)
+        m = textbook.copy()
+        sol_orquestador = m.slim_optimize()
         m_puro = cobra.io.load_model("textbook")
         sol_puro = m_puro.slim_optimize()
-        
         assert sol_orquestador == pytest.approx(sol_puro, abs=1e-6)
 
     def test_crecimiento_anaerobio_coincide_con_cobrapy(self, textbook):
-        """El crecimiento anaerobio debe coincidir con COBRApy puro."""
-        m_orq = me.configurar_ambiente(textbook, "anaerobio")
+        m_orq = me.configurar_ambiente(textbook.copy(), "anaerobio")
         sol_orq = m_orq.slim_optimize()
-        
         m_puro = cobra.io.load_model("textbook")
         m_puro.reactions.EX_o2_e.bounds = (0, 1000)
         sol_puro = m_puro.slim_optimize()
-        
         assert sol_orq == pytest.approx(sol_puro, abs=1e-6)
 
-
-# =====================================================================
-# C5. PRUEBAS METAMÓRFICAS
-# =====================================================================
 class TestMetamorficas:
-    def test_escalado_de_glucosa(self, textbook):
-        """Si duplicamos la glucosa, los flujos se duplican, pero el rendimiento no cambia."""
+    def test_escalado_de_todas_las_cotas(self, textbook):
         m = textbook.copy()
-        m.reactions.EX_glc__D_e.lower_bound = -10
-        sol_10 = m.optimize()
-        
-        m.reactions.EX_glc__D_e.lower_bound = -20
-        sol_20 = m.optimize()
-        
-        # El crecimiento debe duplicarse
-        assert sol_20.objective_value == pytest.approx(sol_10.objective_value * 2, rel=1e-4)
+        cotas = []
+        for rxn in m.reactions:
+            if rxn.lower_bound != 0 and rxn.lower_bound != -1000:
+                cotas.append((rxn, 'lower', rxn.lower_bound))
+            if rxn.upper_bound != 0 and rxn.upper_bound != 1000:
+                cotas.append((rxn, 'upper', rxn.upper_bound))
+        sol_1 = m.optimize()
+        flujo_1 = sol_1.fluxes['EX_glc__D_e']
+        for rxn, tipo, valor in cotas:
+            if tipo == 'lower': rxn.lower_bound = valor * 2
+            else: rxn.upper_bound = valor * 2
+        sol_2 = m.optimize()
+        flujo_2 = sol_2.fluxes['EX_glc__D_e']
+        assert flujo_2 == pytest.approx(flujo_1 * 2, rel=1e-4)
 
-    def test_reordenar_reacciones_no_cambia_resultado(self, textbook):
-        """El orden de las reacciones en el diccionario no debe afectar el FBA."""
+    def test_renombrar_reaccion_no_cambia_resultado(self, textbook):
         m = textbook.copy()
-        # Forzamos un reordenamiento interno (esto simula cambiar el orden en el XML)
-        reacciones_originales = list(m.reactions)
-        m.reactions._reaction_dict.clear()
-        for r in reversed(reacciones_originales):
-            m.reactions._reaction_dict[r.id] = r
-            
-        assert m.slim_optimize() == pytest.approx(textbook.slim_optimize(), abs=1e-6)
+        val_original = m.slim_optimize()
+        m_nuevo = cobra.Model("test")
+        for met in m.metabolites: m_nuevo.add_metabolites([met])
+        reacciones = list(m.reactions)
+        random.shuffle(reacciones)
+        for rxn in reacciones: m_nuevo.add_reactions([rxn])
+        m_nuevo.objective = BIO_TEXTBOOK
+        assert m_nuevo.slim_optimize() == pytest.approx(val_original, abs=1e-6)
 
-
-# =====================================================================
-# C7. CONTROLES NEGATIVOS
-# =====================================================================
 class TestControlesNegativos:
     def test_metabolito_sin_ruta_da_cero(self, textbook):
-        """Si pedimos un químico que no existe, el fitness debe ser 0, no un error."""
-        fit = me.evaluar_bacteria(textbook, [], "EX_metabolito_falso_e", BIO)
+        fit = me.evaluar_bacteria(textbook.copy(), [], "EX_metabolito_falso_e", BIO_TEXTBOOK)
         assert fit == 0.0
 
     def test_knockout_letal_da_fitness_cero(self, textbook):
-        """Apagar un gen esencial debe dar fitness 0."""
-        # eno (b2779) es esencial para la glucólisis
-        fit = me.evaluar_bacteria(textbook, ["b2779"], "EX_succ_e", BIO)
+        fit = me.evaluar_bacteria(textbook.copy(), ["b2779"], "EX_succ_e", BIO_TEXTBOOK)
         assert fit == 0.0
 
     def test_no_supera_el_maximo_estequiometrico(self, textbook):
-        """El fitness nunca debe superar el máximo teórico del FBA (no hay energía gratis)."""
         m = textbook.copy()
         m.reactions.EX_succ_e.bounds = (0, 1000)
+        m.objective = 'EX_succ_e'
         max_succ = m.slim_optimize(error_value=0.0)
-        
-        # Evaluamos la cepa WT (sin knockouts)
-        fit_wt = me.evaluar_bacteria(m, [], "EX_succ_e", BIO)
-        
-        # El fitness no puede ser mayor al máximo absoluto
+        fit_wt = me.evaluar_bacteria(m, [], "EX_succ_e", BIO_TEXTBOOK)
         assert fit_wt <= max_succ + 1e-6
+
+class TestE4Paper2022:
+    def test_cepa_del_paper_en_sus_condiciones(self):
+        """Replica las condiciones exactas del paper (Toya & Shimizu 2022)."""
+        m, _ = me.cargar_modelo_universal("iML1515")
+        BIO_I1515 = "BIOMASS_Ec_iML1515_core_75p37M"
+        genes_ssd1 = ['b1854', 'b1676', 'b1479', 'b2463', 'b1852']
+
+        # Condiciones del paper: microaerobiosis, glucosa 10, sin crecimiento
+        m.reactions.EX_o2_e.lower_bound = -2.0
+        m.reactions.EX_glc__D_e.lower_bound = -10.0
+        m.reactions.get_by_id(BIO_I1515).bounds = (0, 0)
+        m.objective = 'EX_succ_e'
+        y_max_wt = m.slim_optimize(error_value=float('nan')) / 10.0
+
+        m_mut = m.copy()
+        for g in genes_ssd1:
+            if g in m_mut.genes: m_mut.genes.get_by_id(g).knock_out()
+        y_max_mut = m_mut.slim_optimize(error_value=float('nan')) / 10.0
+
+        print(f"\n--- E4: Condiciones del Paper (Toya 2022) ---")
+        print(f"WT  (maximo FBA): {y_max_wt:.4f} mol/mol")
+        print(f"SSD1 (maximo FBA): {y_max_mut:.4f} mol/mol")
+
+        # CORRECCIÓN: ambos máximos deben ser >= a los valores experimentales del paper
+        assert y_max_wt >= 0.20 - 1e-6, f"El maximo del WT ({y_max_wt}) debe ser al menos 0.20"
+        assert y_max_mut >= 0.48 - 1e-6, f"El maximo del mutante ({y_max_mut}) debe ser al menos 0.48"
+        # Los máximos teóricos deben ser similares (ambos son el límite estequiométrico)
+        assert y_max_mut == pytest.approx(y_max_wt, abs=0.01), "Los maximos teoricos deben ser similares"
