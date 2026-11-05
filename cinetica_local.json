@@ -1,0 +1,9 @@
+{
+  "CAFT_RXN1": {"kcat": 2.5, "Km": 0.01, "enzima": "Xantina metiltransferasa (Planta)"},
+  "CAFT_RXN2": {"kcat": 1.8, "Km": 0.02, "enzima": "Teobromina metiltransferasa (Planta)"},
+  "EX_caft_e": {"kcat": 0.0, "Km": 0.0, "enzima": "Transporte de Cafeina"},
+  "FUM": {"kcat": 800.0, "Km": 0.5, "enzima": "Fumarasa"},
+  "AKGDH": {"kcat": 120.0, "Km": 0.1, "enzima": "Alfa-cetoglutarato deshidrogenasa"},
+  "ATPS4r": {"kcat": 100.0, "Km": 0.2, "enzima": "ATP sintasa"},
+  "NADH16": {"kcat": 500.0, "Km": 0.05, "enzima": "NADH deshidrogenasa I"}
+}

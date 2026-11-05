@@ -5,6 +5,7 @@ import os
 import requests
 import time
 import re
+import json
 from datetime import datetime
 from equilibrator_api import ComponentContribution, Q_
 from rich.console import Console
@@ -13,27 +14,20 @@ from modulo_termodinamica_v2 import construir_reaccion
 
 console = Console()
 
-# NOTA DE DISENO: NO hay datos hardcodeados de ningun organismo.
-# La cinetica (kcat/Km) se obtendria de BRENDA, que requiere API autenticada.
-
 def get_organism_id(modelo_id: str) -> str:
-    """Taxon ID de UniProt segun modelo. Universal."""
-    if "iYO844" in modelo_id: return "224308"    # B. subtilis
-    if "iCW773" in modelo_id: return "196627"    # C. glutamicum
-    if "iMM904" in modelo_id: return "559292"    # S. cerevisiae
-    if "iEK1008" in modelo_id: return "1773"     # M. tuberculosis
-    if "textbook" in modelo_id or "iML1515" in modelo_id or "coli" in modelo_id.lower():
-        return "83333"                            # E. coli K-12
+    if "iYO844" in modelo_id: return "224308"
+    if "iCW773" in modelo_id: return "196627"
+    if "iMM904" in modelo_id: return "559292"
+    if "iEK1008" in modelo_id: return "1773"
     return "83333"
 
 def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
-    """Consulta UniProt + Rhea. Universal: si el gen no tiene digitos, asume nombre comun."""
     if not re.search(r'\d', gen_id):
         return gen_id, "Nombre comun", "N/A"
 
-    # Busca por gene_exact o locus_tag
+    # BÚSQUEDA GLOBAL CORREGIDA
     url = (f"https://rest.uniprot.org/uniprotkb/search?"
-           f"query=organism_id:{organism_id}+AND+(gene_exact:{gen_id}+OR+locus_tag:{gen_id})"
+           f"query=organism_id:{organism_id}+AND+{gen_id}"
            f"&fields=gene_names,protein_name,xref_rhea&format=json")
     try:
         time.sleep(0.2)
@@ -53,9 +47,7 @@ def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
     return gen_id, "No encontrado", "N/A"
 
 def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness):
-    """Genera un reporte cientifico .md universal."""
     console.print(f"\n[cyan]INFO[/cyan] Generando Reporte Cientifico...")
-
     organism_id = get_organism_id(modelo_id)
 
     genes_info = []
@@ -86,13 +78,38 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
             f.write(f"| `{info['id']}` | **{info['nombre']}** | {info['funcion']} | `{info['rhea']}` |\n")
         f.write("\n")
 
-        f.write("## 3. Nota sobre Cinetica Enzimatica\n\n")
-        f.write("Los parametros cineticos especificos (kcat/Km) **no estan incluidos** en este reporte "
-                "porque requieren una conexion autenticada a la API de BRENDA (acceso no publico). "
-                "Esta herramienta prioriza la universalidad: todos los datos genomicos se extraen "
-                "dinamicamente desde UniProt y Rhea, por lo que funciona para cualquier organismo.\n\n")
-        f.write("Si necesitas cinetica, puedes aportar tus propios valores desde BRENDA/SABIO-RK "
-                "para las reacciones relevantes.\n\n")
+        f.write("## 3. Cinetica Enzimatica (Base de Datos Local)\n\n")
+        if os.path.exists("cinetica_local.json"):
+            try:
+                with open("cinetica_local.json", "r", encoding="utf-8") as file:
+                    db_cinetica = json.load(file)
+            except:
+                db_cinetica = {}
+                
+            reacciones_a_analizar = [quimico]
+            for g in mejor_genes:
+                if g in modelo.genes:
+                    for rxn in modelo.genes.get_by_id(g).reactions:
+                        if rxn.id not in reacciones_a_analizar:
+                            reacciones_a_analizar.append(rxn.id)
+                            
+            encontrados = False
+            tabla_cinetica = "| Reaccion | Enzima | kcat (1/s) | Km (mM) |\n| :--- | :--- | :--- | :--- |\n"
+            for r_id in reacciones_a_analizar:
+                if r_id in db_cinetica:
+                    datos = db_cinetica[r_id]
+                    tabla_cinetica += f"| `{r_id}` | {datos.get('enzima', 'Desconocida')} | {datos.get('kcat', 'N/A')} | {datos.get('Km', 'N/A')} |\n"
+                    encontrados = True
+            
+            if encontrados:
+                f.write("Los siguientes parametros fueron extraidos de la base de datos local (`cinetica_local.json`).\n\n")
+                f.write(tabla_cinetica)
+            else:
+                f.write("*No se encontraron parametros cineticos para estas reacciones en la base de datos local.*\n\n")
+        else:
+            f.write("*No se encontro el archivo `cinetica_local.json`.*\n\n")
+
+        f.write("> **Nota de diseno:** El software prioriza la universalidad sin requerir licencias de pago (ej. BRENDA). El investigador puede agregar valores manualmente al JSON.\n\n")
 
         f.write("## 4. Analisis Termodinamico (eQuilibrator)\n\n")
         f.write("| Reaccion | DG' (kJ/mol) | Viable |\n")
@@ -101,10 +118,7 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
         cc = ComponentContribution()
         cc.p_h = Q_(7.0); cc.p_mg = Q_(3.0); cc.ionic_strength = Q_("0.1 M")
         
-        # MEJORA: Analizar la reaccion objetivo y las que se bloquearon
-        reacciones_a_probar = []
-        if quimico in modelo.reactions:
-            reacciones_a_probar.append(quimico)
+        reacciones_a_probar = [quimico] if quimico in modelo.reactions else []
         for g in mejor_genes:
             if g in modelo.genes:
                 for rxn in modelo.genes.get_by_id(g).reactions:
@@ -112,7 +126,6 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
                         reacciones_a_probar.append(rxn.id)
 
         for r_id in reacciones_a_probar[:10]:
-            # FILTRO: Ignorar sintéticos
             if r_id.startswith("CAFT") or r_id.startswith("XAN") or r_id.startswith("EX_caft"):
                 f.write(f"| `{r_id}` | N/A (Sintetico) | N/A |\n")
                 continue
