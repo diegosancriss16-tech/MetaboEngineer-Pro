@@ -72,13 +72,8 @@ def preguntar_seed():
 # CONFIGURACION REGULATORIA (Nivel PhD)
 # ==========================================
 def configurar_ambiente(modelo, ambiente):
-    """
-    Ajusta el modelo para simular condiciones aerobias o anaerobias.
-    Además, aplica Reglas Lógicas Regulatorias (Estilo GIMME).
-    """
     modelo_amb = modelo.copy()
     
-    # 1. Oxígeno
     if 'EX_o2_e' in modelo_amb.reactions:
         if ambiente == 'anaerobio':
             modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 1000.0)
@@ -88,9 +83,7 @@ def configurar_ambiente(modelo, ambiente):
         if ambiente == 'anaerobio':
             console.print("[yellow]WARN[/yellow] El modelo no tiene EX_o2_e, no se puede simular anaerobiosis.")
 
-    # 2. Regulación lógica (Nivel PhD) - Solo bloqueo de fermentación en aerobio
     if ambiente == 'aerobio':
-        # En aerobiosis, la célula reprime la fermentación (Efecto Pasteur)
         for rxn in ["EX_etoh_e", "EX_lac__D_e", "EX_for_e"]:
             if rxn in modelo_amb.reactions:
                 modelo_amb.reactions.get_by_id(rxn).bounds = (0.0, 1000.0)
@@ -248,7 +241,6 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     if crecimiento_wt <= 0: return [g.id for g in modelo.genes]
 
     for gen in track(modelo.genes, description="Evaluando esencialidad..."):
-        # FILTRO DE PSEUDOGENES (Nivel PhD)
         if gen.id == "s0001" or "spontaneous" in gen.name.lower():
             continue
             
@@ -263,14 +255,12 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     return genes_no_esenciales
 
 def aplicar_restricciones_cineticas(modelo):
-    """Nivel PhD: Kinetic-Constrained FBA. Aplica Vmax = kcat * [E]."""
     if not os.path.exists("cinetica_local.json"): return modelo
     try:
         with open("cinetica_local.json", "r", encoding="utf-8") as f: db = json.load(f)
     except: return modelo
 
-    pool_enzima = 0.1 # g/gDW
-    aplicadas = 0
+    pool_enzima = 0.1 
     for rxn_id, data in db.items():
         if rxn_id in modelo.reactions and "kcat" in data:
             kcat = data["kcat"]
@@ -280,13 +270,10 @@ def aplicar_restricciones_cineticas(modelo):
                 nuevo_upper = min(rxn.upper_bound, v_max)
                 nuevo_lower = max(rxn.lower_bound, -v_max)
                 rxn.bounds = (nuevo_lower, nuevo_upper)
-                aplicadas += 1
     return modelo
 
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
     modelo = modelo_base.copy()
-    
-    # NOTA: La cinética ya se aplicó globalmente en el main().
     
     for gen_id in genes_apagados:
         if gen_id in modelo.genes:
@@ -305,8 +292,7 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
         sol_prod = modelo.optimize()
         
         if sol_prod.status == 'optimal':
-            produccion = sol_prod.objective_value
-            return max(0.0, produccion)
+            return max(0.0, sol_prod.objective_value)
     except Exception:
         pass
     return 0.0
@@ -345,13 +331,11 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
     
-    # GPR
     for gen_id in genes_a_mutar:
         if gen_id in modelo_mut.genes:
             modelo_mut.genes.get_by_id(gen_id).knock_out()
             
     try:
-        # Bi-level (90% biomasa)
         modelo_mut.objective = gen_biomasa
         sol_bio = modelo_mut.optimize()
         
@@ -497,7 +481,9 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
     
     console.print("\n[cyan]INFO[/cyan] Buscando el óptimo exacto (MILP equivalent)...")
     sol_wt = modelo.optimize()
-    reacciones_activas = [r.id for r, v in sol_wt.fluxes.items() if abs(v) > 0.1 and not r.startswith("EX_")]
+    
+    # ARREGLO: r es el ID (string), no un objeto reacción
+    reacciones_activas = [r for r, v in sol_wt.fluxes.items() if abs(v) > 0.1 and not r.startswith("EX_")]
     genes_activos = sorted(list({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes}))
     
     mejor_ratio = -1
@@ -616,7 +602,7 @@ def main():
         try:
             modelo, msg = cargar_modelo_universal(modelo_id)
             modelo = configurar_ambiente(modelo, ambiente)
-            modelo = aplicar_restricciones_cineticas(modelo) # APLICADO GLOBALMENTE AQUÍ
+            modelo = aplicar_restricciones_cineticas(modelo)
             console.print(f"[green]OK[/green] {msg} | {len(modelo.reactions)} reacciones | Ambiente: {ambiente.upper()}\n")
         except Exception as e:
             console.print(Panel(str(e), title="ERROR", border_style="red")); return

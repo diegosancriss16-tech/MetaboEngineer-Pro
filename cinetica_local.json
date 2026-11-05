@@ -1,9 +1,11 @@
 {
   "CAFT_RXN1": {"kcat": 2.5, "Km": 0.01, "enzima": "Xantina metiltransferasa (Planta)"},
   "CAFT_RXN2": {"kcat": 1.8, "Km": 0.02, "enzima": "Teobromina metiltransferasa (Planta)"},
-  "EX_caft_e": {"kcat": 0.0, "Km": 0.0, "enzima": "Transporte de Cafeina"},
-  "FUM": {"kcat": 800.0, "Km": 0.5, "enzima": "Fumarasa"},
-  "AKGDH": {"kcat": 120.0, "Km": 0.1, "enzima": "Alfa-cetoglutarato deshidrogenasa"},
-  "ATPS4r": {"kcat": 100.0, "Km": 0.2, "enzima": "ATP sintasa"},
-  "NADH16": {"kcat": 500.0, "Km": 0.05, "enzima": "NADH deshidrogenasa I"}
+  "PYK": {"kcat": 200.0, "Km": 0.4, "enzima": "Piruvato quinasa"},
+  "PFK": {"kcat": 150.0, "Km": 0.1, "enzima": "Fosfofructoquinasa"},
+  "FBA": {"kcat": 45.0, "Km": 0.5, "enzima": "Fructosa-bisfosfato aldolasa"},
+  "GAPD": {"kcat": 120.0, "Km": 0.2, "enzima": "Gliceraldehído-3-fosfato deshidrogenasa"},
+  "PGI": {"kcat": 300.0, "Km": 0.6, "enzima": "Glucosa-6-fosfato isomerasa"},
+  "ENO": {"kcat": 180.0, "Km": 0.1, "enzima": "Enolasa"},
+  "PDH": {"kcat": 50.0, "Km": 0.2, "enzima": "Piruvato deshidrogenasa"}
 }
