@@ -1,9 +1,8 @@
 """
 Suite de Validación contra Papers Canónicos
-Basado en: Monk 2017, Burgard 2003, Patil 2005, Tepper 2010, Jensen 2019, Toya 2022
-
-Fix aplicado: E4a restituido como estricto (vs single_gene_deletion con tolerancia 1e-6).
-E4 reescrito con crecimiento activo (10% del WT) + FVA mínimo (acoplamiento real).
+FIX: E4a ahora lee la columna 'ids' del DataFrame de single_gene_deletion
+(no el índice, que es numérico y cuyo orden cambia por multiprocessing).
+Fixtures herméticos: modelo fresco por test, sin estado compartido.
 """
 import pytest
 import cobra
@@ -17,91 +16,116 @@ BIO_I1515 = "BIOMASS_Ec_iML1515_core_75p37M"
 BIO_TEXTBOOK = "Biomass_Ecoli_core"
 
 
-@pytest.fixture(scope="module")
-def iML1515():
+# =====================================================================
+# FIXTURES HERMÉTICOS
+# =====================================================================
+@pytest.fixture
+def fresh_model():
+    """Modelo FRESCO por test. Sin estado compartido entre tests."""
     m, _ = me.cargar_modelo_universal("iML1515")
+    m.objective = BIO_I1515
     return m
 
 
+@pytest.fixture
+def gene_sample():
+    """Muestra determinística de 50 genes (semilla fija)."""
+    random.seed(42)
+    m, _ = me.cargar_modelo_universal("iML1515")
+    return random.sample([g.id for g in m.genes], 50)
+
+
 # =====================================================================
-# E1: Baseline FBA (Monk 2017, iML1515)
+# E1: Baseline FBA (Monk 2017)
 # =====================================================================
 class TestE1_BaselineFBA:
-    def test_aerobic_growth(self, iML1515):
-        m = iML1515.copy()
+    def test_aerobic_growth(self, fresh_model):
+        m = fresh_model
         m.reactions.EX_glc__D_e.lower_bound = -10.0
         m.reactions.EX_o2_e.lower_bound = -1000.0
-        m.objective = BIO_I1515
         mu = m.slim_optimize()
         print(f"\nE1 Aerobio: mu = {mu:.4f} h-1 (literatura: 0.877)")
         assert mu == pytest.approx(0.877, abs=0.02)
 
-    def test_anaerobic_growth(self, iML1515):
-        m = iML1515.copy()
+    def test_anaerobic_growth(self, fresh_model):
+        m = fresh_model
         m.reactions.EX_glc__D_e.lower_bound = -10.0
         m.reactions.EX_o2_e.lower_bound = 0.0
-        m.objective = BIO_I1515
         mu = m.slim_optimize()
         print(f"\nE1 Anaerobio: mu = {mu:.4f} h-1 (literatura: ~0.2-0.3)")
         assert 0.10 <= mu <= 0.35
 
 
 # =====================================================================
-# E4a: Esencialidad ESTRICTA (vs single_gene_deletion, tolerancia 1e-6)
+# E4a: Esencialidad ESTRICTA vs single_gene_deletion
+# FIX CRÍTICO: leer la columna 'ids', no el índice.
 # =====================================================================
 class TestE4a_EssentialityStrict:
-    def test_essentiality_matches_cobrapy_strict(self, iML1515):
+    def test_essentiality_matches_cobrapy_strict(self, fresh_model, gene_sample):
         """
-        FIX: Comparación estricta contra single_gene_deletion.
-        Usa knockout canónico y NO salta genes ausentes.
+        Comparación estricta contra single_gene_deletion.
+        FIX: los genes están en la COLUMNA 'ids' (frozensets), no en el index.
+        El índice es numérico y su orden cambia por multiprocessing.
         """
-        m = iML1515.copy()
-        m.objective = BIO_I1515
-        wt = m.slim_optimize()
+        m_ref = fresh_model
+        wt = m_ref.slim_optimize()
+        ref = single_gene_deletion(m_ref, gene_list=gene_sample)
 
-        random.seed(42)
-        sample = random.sample([g.id for g in m.genes], 50)
+        def extraer_gene(ids):
+            """Robusto ante frozenset/tuple/list/string según versión de cobra."""
+            if isinstance(ids, (frozenset, set, tuple, list)):
+                return next(iter(ids))
+            return ids
 
-        # Referencia de COBRApy (con copia para no contaminar)
-        ref = single_gene_deletion(m.copy(), sample)
-        ref_essential = {sample[i] for i, g in enumerate(ref.growth) if g < 0.05 * wt}
+        # ✅ CORRECTO: iterar la COLUMNA 'ids', emparejada con 'growth' por fila
+        ref_growth = {extraer_gene(ids): g
+                      for ids, g in zip(ref['ids'], ref['growth'])}
+        ref_essential = {g for g, mu in ref_growth.items()
+                         if mu < 0.05 * wt}
 
-        # Nuestra clasificación (misma lógica que obtener_genes_no_esenciales)
+        # Nuestro método (copias independientes)
         our_essential = set()
-        for gen_id in sample:
-            if gen_id not in m.genes:
-                pytest.fail(f"Gen {gen_id} no está en el modelo. No se debe saltar.")
-            m_test = m.copy()
-            with m_test:
-                knock_out_model_genes(m_test, [gen_id])
-                growth = m_test.slim_optimize(error_value=0.0)
+        for gen_id in gene_sample:
+            m_test = fresh_model.copy()
+            m_test.genes.get_by_id(gen_id).knock_out()
+            growth = m_test.slim_optimize(error_value=0.0)
             if growth < 0.05 * wt:
                 our_essential.add(gen_id)
 
         mismatches = ref_essential.symmetric_difference(our_essential)
-        print(f"\nE4a ESTRICTO: {len(mismatches)} discrepancias en 50 genes")
+        print(f"\nE4a ESTRICTO: {len(mismatches)} discrepancias en {len(gene_sample)} genes")
         print(f"  COBRApy esenciales: {sorted(ref_essential)}")
         print(f"  Nuestro esenciales: {sorted(our_essential)}")
-        assert len(mismatches) == 0, f"Discrepancias: {mismatches}"
+        assert len(mismatches) == 0, f"Discrepancias: {sorted(mismatches)}"
 
-    def test_known_essential_genes_exist(self, iML1515):
-        """Verifica que genes esenciales conocidos existen en el modelo."""
-        # rpsA (b0911), rpoC (b3988), gltX (b2400) - IDs de Keio/EcoCyc
-        known = ['b0911', 'b2400', 'b3988']
-        missing = [g for g in known if g not in iML1515.genes]
-        if missing:
-            print(f"\nWARN: Genes no encontrados en iML1515: {missing}")
-            print("Verifica los IDs. Algunos pueden tener nombres diferentes en iML1515.")
-        # No fallar - solo informar
-        assert True
+    def test_essentiality_literature_validation(self, fresh_model, gene_sample):
+        """Validación contra literatura: ~18-22% de genes esenciales (Keio/Monk)."""
+        m = fresh_model
+        wt = m.slim_optimize()
+
+        esenciales = 0
+        for gen_id in gene_sample:
+            m_test = m.copy()
+            m_test.genes.get_by_id(gen_id).knock_out()
+            try:
+                growth = m_test.slim_optimize(error_value=0.0)
+                if growth < 0.05 * wt:
+                    esenciales += 1
+            except:
+                esenciales += 1
+
+        pct = esenciales / len(gene_sample) * 100
+        print(f"\nE4a: {esenciales}/{len(gene_sample)} genes esenciales ({pct:.1f}%)")
+        print(f"    Literatura (Monk 2017): ~18%")
+        assert 2 <= esenciales <= 18, f"Fuera de rango: {esenciales}/{len(gene_sample)} ({pct:.1f}%)"
 
 
 # =====================================================================
 # E4b: FVA - Producción Garantizada (Tepper 2010)
 # =====================================================================
 class TestE4b_FVA:
-    def test_fva_minimum_guaranteed(self, iML1515):
-        m = iML1515.copy()
+    def test_fva_minimum_guaranteed(self, fresh_model):
+        m = fresh_model
         m.reactions.EX_glc__D_e.lower_bound = -10.0
         m.reactions.EX_o2_e.lower_bound = 0.0
         m.reactions.EX_succ_e.bounds = (0, 1000)
@@ -134,74 +158,41 @@ class TestE4c_Thermodynamics:
 
 
 # =====================================================================
-# E4: Paper 2022 (Toya & Shimizu) - CRECIMIENTO ACTIVO + FVA MÍNIMO
+# E4: Paper 2022 (Toya & Shimizu)
 # =====================================================================
-class TestE4a_EssentialityStrict:
-    @pytest.mark.xfail(strict=True, reason=(
-        "COBRApy's single_gene_deletion is NOT a ground truth for essentiality. "
-        "It uses internal solver tolerances and gene-reaction mappings that differ from "
-        "gene.knock_out(). For example, it reports b0040 (thyA) as essential, but "
-        "gene.knock_out() gives growth = 100% WT for the same gene. The scientific "
-        "validation is against Keio/Monk experimental data (proportional ~22% vs ~18%), "
-        "which passes in test_essentiality_literature_validation."
-    ))
-    def test_essentiality_matches_cobrapy_strict(self, iML1515):
-        """Comparación estricta contra single_gene_deletion (documentada como no alcanzable)."""
-        from cobra.manipulation import knock_out_model_genes
-        m = iML1515.copy()
-        m.objective = BIO_I1515
-        wt = m.slim_optimize()
+class TestE4Paper2022:
+    def test_experimental_yields_below_fba_bound(self, fresh_model):
+        """Validación honesta: experimental < FBA máximo (techo termodinámico)."""
+        m = fresh_model
+        m.reactions.EX_glc__D_e.lower_bound = -10.0
+        m.reactions.EX_o2_e.lower_bound = -2.0
+        m.reactions.get_by_id(BIO_I1515).bounds = (0, 0)
+        m.reactions.EX_succ_e.bounds = (0, 1000)
+        m.objective = 'EX_succ_e'
 
-        random.seed(42)
-        sample = random.sample([g.id for g in m.genes], 50)
+        wt_fba = m.slim_optimize() / 10.0
 
-        ref = single_gene_deletion(m.copy(), sample)
+        m_mut = m.copy()
+        for g in ['b1854', 'b1676', 'b1479', 'b2463', 'b1852']:
+            m_mut.genes.get_by_id(g).knock_out()
+        ssd1_fba = m_mut.slim_optimize() / 10.0
 
-        mismatches = []
-        for gen_id in sample:
-            growth_ref = ref.loc[gen_id, 'growth']
-            m_test = m.copy()
-            with m_test:
-                knock_out_model_genes(m_test, [gen_id])
-                growth_our = m_test.slim_optimize(error_value=0.0)
-            if abs(growth_ref - growth_our) > 1e-6:
-                mismatches.append((gen_id, growth_ref, growth_our))
+        print(f"\n--- Validación Paper 2022 (Toya & Shimizu) ---")
+        print(f"Experimental: WT=0.20, SSD1=0.48")
+        print(f"FBA máximo:   WT={wt_fba:.4f}, SSD1={ssd1_fba:.4f}")
 
-        assert len(mismatches) == 0, f"Discrepancias: {mismatches}"
+        assert wt_fba >= 0.20, f"WT FBA ({wt_fba}) debe ser >= 0.20"
+        assert ssd1_fba >= 0.48, f"SSD1 FBA ({ssd1_fba}) debe ser >= 0.48"
+        print("✅ El modelo respeta la termodinámica (FBA >= Experimental).")
 
-    def test_essentiality_literature_validation(self, iML1515):
-        """Validación contra literatura: ~18-22% de genes esenciales (Keio/Monk)."""
-        m = iML1515.copy()
-        m.objective = BIO_I1515
-        wt = m.slim_optimize()
-
-        random.seed(42)
-        sample = random.sample([g.id for g in m.genes], 50)
-
-        esenciales = 0
-        for gen_id in sample:
-            m_test = m.copy()
-            m_test.genes.get_by_id(gen_id).knock_out()
-            m_test.objective = BIO_I1515
-            try:
-                growth = m_test.slim_optimize(error_value=0.0)
-                if growth < 0.05 * wt:
-                    esenciales += 1
-            except:
-                esenciales += 1
-
-        pct = esenciales / 50 * 100
-        print(f"\nE4a: {esenciales}/50 genes esenciales ({pct:.1f}%)")
-        print(f"    Literatura (Monk 2017): ~18%")
-        assert 2 <= esenciales <= 18, f"Fuera de rango: {esenciales}/50 ({pct:.1f}%)"
 
 # =====================================================================
 # E5: End-to-End Pipeline (Jensen 2019) - marcado como slow
 # =====================================================================
 @pytest.mark.slow
 class TestE5_EndToEnd:
-    def test_full_pipeline_quick(self, iML1515):
-        m = iML1515.copy()
+    def test_full_pipeline_quick(self, fresh_model):
+        m = fresh_model
         m.reactions.EX_glc__D_e.lower_bound = -10.0
         m.reactions.EX_o2_e.lower_bound = 0.0
         m.reactions.EX_succ_e.bounds = (0, 1000)
@@ -223,7 +214,6 @@ class TestE5_EndToEnd:
         print(f"\nE5 End-to-End:")
         print(f"  Genes no esenciales: {len(genes_ok)} ({t_esencialidad:.1f}s)")
         print(f"  Mejor fitness: {mejor['fitness']:.4f} ({t_ia:.1f}s)")
-        print(f"  Genes: {mejor['genes']}")
 
         assert len(genes_ok) > 1000
         assert mejor['fitness'] >= 0
