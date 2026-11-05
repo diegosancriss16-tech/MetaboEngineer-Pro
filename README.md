@@ -1,28 +1,29 @@
-# 🧬 MetaboEngineer Pro
+# 🧬 MetaboEngineer Pro (V6.0)
 
-> Suite integral de ingeniería metabólica y biología sintética para el diseño racional de cepas microbianas.
+> Suite integral de ingeniería metabólica y biología sintética para el diseño racional de cepas microbianas basada en IA y validación biológica.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status](https://img.shields.io/badge/Status-Stable-green.svg)]()
-[![Version](https://img.shields.io/badge/Version-5.2-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/Version-6.0-brightgreen.svg)]()
 [![COBRApy](https://img.shields.io/badge/COBRApy-%E2%89%A50.29-blue.svg)](https://opencobra.github.io/cobrapy/)
 [![eQuilibrator](https://img.shields.io/badge/eQuilibrator-%E2%89%A50.4-purple.svg)](https://equilibrator.weizmann.ac.il/)
+[![Tests](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml/badge.svg)](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml)
 
-**MetaboEngineer Pro** integra algoritmos genéticos, acoplamiento de crecimiento (OptKnock), validación termodinámica (eQuilibrator), extracción de datos genómicos (UniProt/Rhea) y visualización interactiva de redes metabólicas en una sola interfaz de línea de comandos.
+**MetaboEngineer Pro** integra algoritmos genéticos, acoplamiento de crecimiento (OptKnock), validación termodinámica (eQuilibrator) y extracción de datos genómicos (UniProt/Rhea) en una sola interfaz. A diferencia de otros scripts que generan soluciones matemáticamente óptimas pero biológicamente inviables, esta herramienta implementa un **Filtro Universal de Esencialidad** y simulación de ambientes aerobios/anaerobios, alineándose con la literatura experimental.
 
 ---
 
 ## 📋 Tabla de Contenidos
 
 - [Características](#-características)
+- [Validación Biológica](#-validación-biológica)
 - [Instalación](#-instalación)
 - [Uso rápido](#-uso-rápido)
 - [Ejemplos](#-ejemplos)
 - [Arquitectura](#-arquitectura)
 - [Estructura del proyecto](#-estructura-del-proyecto)
 - [Formatos de salida](#-formatos-de-salida)
-- [Repositorios soportados](#-repositorios-soportados)
 - [Limitaciones conocidas](#-limitaciones-conocidas)
 - [Roadmap](#-roadmap)
 - [Citación](#-citación)
@@ -34,16 +35,22 @@
 
 | Módulo | Descripción |
 |---|---|
-| **FBA Básico** | Análisis de flujos (Flux Balance Analysis) con COBRApy |
-| **Diseño por IA** | Algoritmo genético para encontrar knockouts que maximicen la producción |
-| **OptKnock Híbrido** | Acoplamiento crecimiento-producción (cepas estables en biorreactor) |
-| **Termodinámica** | ΔG' de reacciones vía eQuilibrator (viabilidad energética) |
-| **Reporte científico** | Generación automática de reporte `.md` con UniProt + Rhea + termo |
-| **Mapa visual** | Red metabólica interactiva (PyVis/HTML) |
-| **Multi-organismo** | E. coli, S. cerevisiae, B. subtilis, M. tuberculosis y cualquier modelo SBML |
-| **Caché inteligente** | Los modelos se guardan, indexan y verifican (SHA256) automáticamente |
-| **Biología sintética** | Inyección de rutas heterólogas (ej. cafeína) |
-| **Interfaz web** | Streamlit opcional para uso sin terminal |
+| **Filtro de Esencialidad** | Evalúa la letalidad génica antes de la IA. Evita que el algoritmo "mate" a la célula apagando genes vitales. |
+| **Ambientes Controlados** | Permite simular condiciones **aerobias** o **anaerobias** (esencial para fermentaciones industriales). |
+| **Diseño por IA** | Algoritmo genético para encontrar knockouts que maximicen la producción (con penalización proteica dinámica). |
+| **OptKnock Híbrido** | Acoplamiento crecimiento-producción (cepas estables en biorreactor). |
+| **Termodinámica** | ΔG' de reacciones vía eQuilibrator (ignora intercambios y metabolitos sintéticos para evitar errores de API). |
+| **Reporte científico** | Generación automática de reporte `.md` con UniProt + Rhea + cinética + termo. |
+| **Mapa visual** | Red metabólica interactiva (PyVis/HTML). |
+| **Multi-organismo** | E. coli, S. cerevisiae, B. subtilis, M. tuberculosis y cualquier modelo SBML. |
+| **Caché inteligente** | Los modelos se guardan, indexan y verifican (SHA256) automáticamente. |
+| **Biología sintética** | Inyección de rutas heterólogas (ej. cafeína). |
+
+---
+
+## 🔬 Validación Biológica
+
+La herramienta fue validada contra literatura científica real. En pruebas de producción de **succinato** y **etanol** en *E. coli*, el algoritmo redescubrió de forma independiente genes clave reportados en papers experimentales (ej. `pykA`, `pykF`, `maeB`, `frdB`), demostrando que el módulo de IA es capaz de encontrar estrategias metabólicas racionales sin sesgos hardcodeados.
 
 ---
 
@@ -59,7 +66,7 @@
 
 ```bash
 # 1. Clona el repositorio
-git clone https://github.com/<Diegosacris>/MetaboEngineer-Pro.git
+git clone https://github.com/diegosancriss16-tech/MetaboEngineer-Pro.git
 cd MetaboEngineer-Pro
 
 # 2. Crea y activa entorno virtual
@@ -97,7 +104,7 @@ Verás algo como:
 
 ```
 ╭──────────────────────────────────────────────╮
-│ MetaboEngineer Pro V5.2                      │
+│ MetaboEngineer Pro V6.0                      │
 │ Suite Universal de Biologia de Sistemas      │
 ╰──────────────────────────────────────────────╯
 
@@ -108,9 +115,7 @@ Selecciona el organismo base:
   4. Bacillus subtilis
   5. Otro (ingresar ID de BiGG / BioModels / local)
 
-Modelos ya en cache local (listos sin internet):
-  [c1] iEK1008 — 1226 reacciones, 890 genes, 2025-01-15
-  [c0] Seleccion normal (descargar nuevo)
+Condición ambiental [aerobio/anaerobio] (aerobio):
 ```
 
 ### CLI experto (línea de comandos, sin menús)
@@ -120,74 +125,48 @@ python cli_experto.py \
     --modelo iML1515 \
     --quimico EX_succ_e \
     --metodo ia \
-    --generaciones 20 \
-    --seed 42 \
-    --output reportes/
+    --ambiente anaerobio \
+    --generaciones 15 \
+    --poblacion 30 \
+    --seed 42
 ```
 
 ---
 
 ## 🧪 Ejemplos
 
-### Ejemplo 1: Diseñar una cepa productora de succinato en E. coli
+### Ejemplo 1: Diseñar una cepa productora de succinato (Anaerobio)
 
 ```bash
-python metabo_engineer.py
-# → Opción 2 (E. coli completo)
-# → Opción 2 (Diseño por IA)
-# → Químico: EX_succ_e
-# → 10 generaciones, 20 individuos, 4 knockouts
+python cli_experto.py -m iML1515 -q EX_succ_e --metodo ia --ambiente anaerobio --seed 42
 ```
 
 **Salida esperada:**
 
 ```
-[INFO] Diseno de cepas por IA para E. coli (completo, MG1655)...
-Quimico objetivo (ej. EX_succ_e, EX_caft_e): EX_succ_e
-Generaciones [10]:
-Poblacion [20]:
-Genes a apagar [4]:
-Evolucionando... ━━━━━━━━━━━━━━━━━━━━━━━━ 100%
+[INFO] Filtrando genes esenciales...
+[OK] Se descartaron 254 genes letales.
+[INFO] Evolucionando...
+[OK] Diseno completado. Fitness: 13.6707
 
-[OK] Diseno completado.
-Fitness: 12.3456
-
-[INFO] Traduciendo nombres de genes con UniProt...
+[INFO] Traduciendo genes (taxon=83333)...
 ╭────────────── Genes a apagar (Knockouts) ───────────────╮
 │ ID (BiGG) │ Nombre Real  │ Funcion Proteica            │
-│ b0351     │ mhpF         │ Acetaldehyde dehydrogenase  │
-│ b1241     │ adhE         │ Aldehyde-alcohol DH         │
-│ b2296     │ ackA         │ Acetate kinase              │
-│ b3115     │ tdcD         │ Propionate kinase           │
+│ b1676     │ pykF         │ Pyruvate kinase I           │
+│ b2463     │ maeB         │ NADP-dependent malic enzyme │
 ╰──────────────────────────────────────────────────────────╯
-
-[OK] Reporte guardado: reportes/REPORTE_iML1515_EX_succ_e_2025-01-15_11-30.md
 ```
 
-### Ejemplo 2: Acoplar crecimiento a producción (OptKnock)
+### Ejemplo 2: Análisis Integral con inyección de ruta
 
 ```bash
-python metabo_engineer.py
-# → Opción 2 (E. coli completo)
-# → Opción 3 (OptKnock)
-# → Químico: EX_succ_e
-# → Máximo 3 knockouts
-```
-
-**Interpretación:** un ratio alto (> 1) significa que la cepa produce succinato de forma natural al crecer.
-
-### Ejemplo 3: Análisis integral con termodinámica + mapa + reporte
-
-```bash
-python metabo_engineer.py
-# → Opción 2 (E. coli completo)
-# → Opción 4 (Análisis Integral)
+python cli_experto.py -m textbook -q EX_caft_e --metodo integral --ambiente aerobio --inyectar --seed 42
 ```
 
 Genera automáticamente:
 - Reporte `.md` con UniProt + Rhea + cinética + termo
 - Mapa `.html` interactivo
-- Todos los análisis de fases 1-4 en consola
+- Resultados en JSON y CSV
 
 ---
 
@@ -234,29 +213,22 @@ Genera automáticamente:
 MetaboEngineer-Pro/
 │
 ├── metabo_engineer.py           # Orquestador principal (CLI)
-├── cli_experto.py                # CLI no interactivo (para HPC)
-├── app_web.py                    # Interfaz Streamlit
-├── modulo_termodinamica_v2.py    # eQuilibrator wrapper
-├── visualizador_universal.py     # Red metabólica PyVis
-├── reporte_investigador.py       # Reporte .md con UniProt/Rhea
+├── cli_experto.py               # CLI no interactivo (para HPC)
+├── modulo_termodinamica_v2.py   # eQuilibrator wrapper
+├── visualizador_universal.py    # Red metabólica PyVis
+├── reporte_investigador.py      # Reporte .md con UniProt/Rhea
 │
-├── modelos/                      # Cache local de modelos SBML
-│   ├── _index.json               # Índice con SHA256, fecha, metadata
-│   ├── iML1515.xml
-│   └── iEK1008.xml
+├── modelos/                     # Cache local de modelos SBML
+│   ├── _index.json              # Índice con SHA256, fecha, metadata
+│   └── *.xml                    # Modelos descargados
 │
-├── reportes/                     # Salidas generadas
+├── reportes/                    # Salidas generadas
 │   ├── REPORTE_*.md
 │   ├── mapa_*.html
-│   └── historial.csv             # Registro acumulativo de corridas
+│   └── historial.csv            # Registro acumulativo de corridas
 │
-├── tests/                        # Tests con pytest
-│   └── test_core.py
-│
-├── .github/
-│   └── workflows/
-│       └── tests.yml             # CI: corre tests en cada push
-│
+├── tests/                       # Tests con pytest
+├── .github/workflows/tests.yml  # CI: corre tests en cada push
 ├── requirements.txt
 ├── Dockerfile
 ├── .gitignore
@@ -269,80 +241,50 @@ MetaboEngineer-Pro/
 ## 📤 Formatos de salida
 
 ### Reporte Markdown (`.md`)
-
 Vista previa renderizada en GitHub o VS Code (`Ctrl+Shift+V`):
 
 ```markdown
 # Reporte de Ingenieria Metabolica: EX_succ_e
 
-**Fecha:** 2025-01-15 11:30
+**Fecha:** 2026-11-04 11:30
 **Organismo Base:** `iML1515`
 **Reacciones totales del modelo:** 2712
 
 ## 1. Resumen Ejecutivo
-
-- **Rendimiento ajustado (Fitness):** `12.3456 mmol/gDW/h`
-- **Genes knock-out:** `b0351, b1241, b2296, b3115`
+- **Rendimiento ajustado (Fitness):** `13.6707 mmol/gDW/h`
+- **Genes knock-out:** `b1676, b2463, ...`
 
 ## 2. Validacion Genomica (UniProt & Rhea)
-
 | Gen (ID) | Nombre | Funcion Proteica | Rhea ID |
 | :--- | :--- | :--- | :--- |
-| `b0351` | **mhpF** | Acetaldehyde dehydrogenase | RHEA:26869 |
-| `b1241` | **adhE** | Aldehyde-alcohol dehydrogenase | RHEA:26333 |
-...
+| `b1676` | **pykF** | Pyruvate kinase I | RHEA:... |
 ```
 
 ### JSON estructurado (`.json`)
-
 Para análisis en Python/R:
-
 ```json
 {
   "modelo": "iML1515",
   "quimico": "EX_succ_e",
-  "fitness": 12.3456,
-  "genes_knockout": ["b0351", "b1241", "b2296", "b3115"],
-  "parametros": {"generaciones": 10, "poblacion": 20, "mutaciones": 4, "seed": 42},
-  "fecha": "2025-01-15T11:30:00"
+  "metodo": "ia",
+  "fitness": 13.6707,
+  "genes_knockout": ["b1676", "b2463", "b0729"],
+  "parametros": {"generaciones": 15, "poblacion": 30, "ambiente": "anaerobio"},
+  "seed": 42
 }
 ```
 
 ### CSV acumulativo (`historial.csv`)
-
-Todas las corridas en un solo archivo:
-
-```csv
-fecha,modelo,quimico,metodo,fitness,genes,seed
-2025-01-15T11:30,iML1515,EX_succ_e,ia,12.3456,"b0351;b1241;b2296;b3115",42
-2025-01-15T12:00,iML1515,EX_succ_e,optknock,13.2100,"b0351;b2296",42
-```
-
----
-
-## 🌐 Repositorios soportados
-
-| Repositorio | Método de acceso | Estado |
-|---|---|---|
-| **BiGG Models** | `load_model()` + descarga directa | ✅ Automático |
-| **BioModels** | `load_model()` | ✅ Automático |
-| **KBase** | Manual (descarga SBML) | ⚠️ Manual |
-| **ModelSEED** | Manual (descarga SBML) | ⚠️ Manual |
-| **MetaNetX** | Manual (descarga SBML) | ⚠️ Manual |
-| **Local** | Carpeta `modelos/` | ✅ Automático |
-
-**Instrucciones manuales:**
-
-Si BiGG está caído, descarga el XML desde [bigg.ucsd.edu](http://bigg.ucsd.edu) y guárdalo en `modelos/<id>.xml`. La próxima ejecución lo cargará desde disco sin tocar internet.
+Todas las corridas en un solo archivo para Excel/Pandas.
 
 ---
 
 ## ⚠️ Limitaciones conocidas
 
 - **BiGG puede fallar:** el servidor tiene caídas intermitentes. Usa la descarga manual si es necesario.
-- **OptKnock heurístico:** usamos un algoritmo genético, no bilevel optimization exacto (MILP). Resultado aproximado.
-- **Cinética ausente:** los parámetros `kcat/Km` no están incluidos por defecto (requieren API autenticada de BRENDA).
-- **Modelos grandes:** `iML1515` y similares pueden tardar 3-10 min por corrida con IA.
+- **OptKnock heurístico:** usamos un algoritmo genético, no bilevel optimization exacto (MILP).
+- **Cinética ausente:** los parámetros `kcat/Km` no están incluidos por defecto (requieren API de pago de BRENDA). Se incluye un archivo `cinetica_local.json` para valores manuales.
+- **Modelos grandes:** `iML1515` puede tardar varios minutos por corrida con IA.
 - **eQuilibrator:** requiere conexión a internet para descargar compuestos.
 
 ---
@@ -354,12 +296,13 @@ Si BiGG está caído, descarga el XML desde [bigg.ucsd.edu](http://bigg.ucsd.edu
 - [x] Termodinámica universal
 - [x] Reportes científicos
 - [x] Caché + indexación de modelos
-- [x] Interfaz web (Streamlit)
-- [ ] CLI experto con argparse
-- [ ] Tests con pytest + CI
-- [ ] Docker
-- [ ] Caché UniProt offline
-- [ ] Exportación JSON/CSV
+- [x] CLI experto con argparse
+- [x] Tests con pytest + CI
+- [x] Docker
+- [x] Caché UniProt offline
+- [x] Exportación JSON/CSV
+- [x] Filtro universal de esencialidad
+- [x] Simulación aerobia/anaerobia
 - [ ] Comparador de cepas
 - [ ] Integración con BRENDA API (si se consigue acceso)
 
@@ -370,12 +313,12 @@ Si BiGG está caído, descarga el XML desde [bigg.ucsd.edu](http://bigg.ucsd.edu
 Si usas MetaboEngineer Pro en una publicación, cita:
 
 ```bibtex
-@software{metaboengineer2025,
-  author  = {San Miguel, Diego},
+@software{metaboengineer2026,
+  author  = {San Cristóbal, Diego},
   title   = {MetaboEngineer Pro: A Suite for Metabolic Engineering and Synthetic Biology},
   year    = {2026},
-  version = {5.2},
-  url     = {https://github.com/<Diegosacris>/MetaboEngineer-Pro}
+  version = {6.0},
+  url     = {https://github.com/diegosancriss16-tech/MetaboEngineer-Pro}
 }
 ```
 
@@ -392,16 +335,3 @@ Si usas MetaboEngineer Pro en una publicación, cita:
 ## 📄 Licencia
 
 Este proyecto está bajo la licencia MIT. Ver [`LICENSE`](LICENSE) para más detalles.
-
----
-
-## 🧪 Tests
-
-El proyecto usa [pytest](https://pytest.org/) para tests automatizados.
-
-### Correr todos los tests
-
-```bash
-pytest
-
-[![Tests](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml/badge.svg)](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml)
