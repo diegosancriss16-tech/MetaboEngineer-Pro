@@ -70,13 +70,16 @@ def preguntar_seed():
 # CONFIGURACION Y TAXONOMIA
 # ==========================================
 def configurar_ambiente(modelo, ambiente):
-    """Ajusta el modelo para simular condiciones aerobias o anaerobias."""
     modelo_amb = modelo.copy()
-    if 'EX_o2_e' in modelo_amb.reactions:
+    if 'EX_o2_e' not in modelo_amb.reactions:
         if ambiente == 'anaerobio':
-            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 1000.0)
-        else:
-            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0)
+            console.print("[yellow]WARN[/yellow] El modelo no tiene EX_o2_e, no se puede simular anaerobiosis.")
+        return modelo_amb
+        
+    if ambiente == 'anaerobio':
+        modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 1000.0)
+    else:
+        modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0)
     return modelo_amb
 
 def get_organism_id(modelo_id: str) -> str:
@@ -185,25 +188,26 @@ def cargar_modelo_universal(modelo_id):
 # ==========================================
 def inyectar_ruta_heterologa(modelo, quimico):
     if quimico == "EX_caft_e":
-        # CORREGIDO: Usar objetos Metabolite (para evitar ValueError en cobra 0.32)
-        caft_c = Metabolite('caft_c', name='Caffeine', compartment='c')
-        tbrm_c = Metabolite('tbrm_c', name='Theobromine', compartment='c')
-        xan_c = Metabolite('xan_c', name='Xanthine', compartment='c')
-        caft_e = Metabolite('caft_e', name='Caffeine', compartment='e')
-        xan_e = Metabolite('xan_e', name='Xanthine', compartment='e')
+        caft_c = Metabolite('caft_c', name='Caffeine', formula='C8H10N4O2', compartment='c')
+        tbrm_c = Metabolite('tbrm_c', name='Theobromine', formula='C7H8N4O2', compartment='c')
+        xan_c = Metabolite('xan_c', name='Xanthine', formula='C5H4N4O2', compartment='c')
+        caft_e = Metabolite('caft_e', name='Caffeine', formula='C8H10N4O2', compartment='e')
+        xan_e = Metabolite('xan_e', name='Xanthine', formula='C5H4N4O2', compartment='e')
+        h_c = modelo.metabolites.get_by_id("h_c") if "h_c" in modelo.metabolites else Metabolite('h_c', name='H+', formula='H', charge=1, compartment='c')
         
-        # CORREGIDO: Añadir SAM y SAH para balancear la masa
-        sam_c = modelo.metabolites.get_by_id("sam_c") if "sam_c" in modelo.metabolites else Metabolite('sam_c', name='S-Adenosylmethionine', compartment='c')
-        sah_c = modelo.metabolites.get_by_id("sah_c") if "sah_c" in modelo.metabolites else Metabolite('sah_c', name='S-Adenosylhomocysteine', compartment='c')
+        # MAPEO CORRECTO A BIGG (amet_c / ahcys_c)
+        sam_c = modelo.metabolites.get_by_id("amet_c") if "amet_c" in modelo.metabolites else Metabolite('amet_c', name='S-Adenosylmethionine', formula='C15H23N6O5S', charge=1, compartment='c')
+        sah_c = modelo.metabolites.get_by_id("ahcys_c") if "ahcys_c" in modelo.metabolites else Metabolite('ahcys_c', name='S-Adenosylhomocysteine', formula='C14H20N6O5S', compartment='c')
 
-        for met in [caft_c, tbrm_c, xan_c, caft_e, xan_e, sam_c, sah_c]:
+        for met in [caft_c, tbrm_c, xan_c, caft_e, xan_e, h_c, sam_c, sah_c]:
             if met.id not in modelo.metabolites: 
                 modelo.add_metabolites([met])
 
         reacciones = [Reaction('CAFT_RXN1'), Reaction('CAFT_RXN2'), Reaction('EX_caft_e'), Reaction('CAFT_TRANSPORT'), Reaction('EX_xan_e'), Reaction('XAN_TRANSPORT')]
         
-        reacciones[0].add_metabolites({xan_c: -1.0, sam_c: -2.0, tbrm_c: 1.0, sah_c: 2.0})
-        reacciones[1].add_metabolites({tbrm_c: -1.0, sam_c: -1.0, caft_c: 1.0, sah_c: 1.0})
+        # AÑADIR HIDROGENOS (h_c) PARA BALANCEAR CARGA Y MASA
+        reacciones[0].add_metabolites({xan_c: -1.0, sam_c: -2.0, tbrm_c: 1.0, sah_c: 2.0, h_c: 2.0})
+        reacciones[1].add_metabolites({tbrm_c: -1.0, sam_c: -1.0, caft_c: 1.0, sah_c: 1.0, h_c: 1.0})
         reacciones[2].add_metabolites({caft_e: -1.0})
         reacciones[3].add_metabolites({caft_c: -1.0, caft_e: 1.0})
         reacciones[4].add_metabolites({xan_e: -1.0})
@@ -211,21 +215,16 @@ def inyectar_ruta_heterologa(modelo, quimico):
         
         for r in reacciones:
             if r.id not in modelo.reactions:
-                if r.id == "EX_xan_e":
-                    r.bounds = (-10, 1000) 
-                else:
-                    r.bounds = (-1000, 1000) if r.id.startswith("EX_") else (0, 1000)
+                if r.id == "EX_xan_e": r.bounds = (-10, 1000) 
+                else: r.bounds = (-1000, 1000) if r.id.startswith("EX_") else (0, 1000)
                 modelo.add_reactions([r])
-                
         return modelo, "EX_caft_e"
     return None, None
-
 # ==========================================
 # ANALISIS DE ESENCIALIDAD Y EVALUACION
 # ==========================================
 def obtener_genes_no_esenciales(modelo, gen_biomasa):
-    """Elimina genes que, si se apagan, matan a la célula (esenciales)."""
-    console.print("[cyan]INFO[/cyan] Filtrando genes esenciales (esto puede tardar un poco)...")
+    console.print("[cyan]INFO[/cyan] Filtrando genes esenciales...")
     genes_no_esenciales = []
     modelo_wt = modelo.copy()
     modelo_wt.objective = gen_biomasa
@@ -235,15 +234,18 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     if crecimiento_wt <= 0: return [g.id for g in modelo.genes]
 
     for gen in track(modelo.genes, description="Evaluando esencialidad..."):
+        # EXCLUIR PSEUDOGENES
+        if gen.id == "s0001" or "spontaneous" in gen.name.lower():
+            continue
+            
         m = modelo.copy()
-        # ARREGLO GPR
         m.genes.get_by_id(gen.id).knock_out()
         m.objective = gen_biomasa
         sol = m.optimize()
         if sol.status == 'optimal' and sol.objective_value > (crecimiento_wt * 0.05):
             genes_no_esenciales.append(gen.id)
             
-    console.print(f"[green]OK[/green] Se descartaron {len(modelo.genes) - len(genes_no_esenciales)} genes letales.")
+    console.print(f"[green]OK[/green] Se descartaron {len(modelo.genes) - len(genes_no_esenciales)} genes letales/pseudogenes.")
     return genes_no_esenciales
 
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
@@ -312,23 +314,29 @@ def mostrar_cinetica_local(modelo, quimico, genes_knockout):
 def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
+    
     for gen_id in genes_a_mutar:
         if gen_id in modelo_mut.genes:
-            for reaccion in modelo_mut.genes.get_by_id(gen_id).reactions: reaccion.bounds = (0, 0)
-    modelo_mut.objective = quimico
-    sol_final = modelo_mut.optimize()
-    if sol_final.status == 'optimal':
-        produccion = sol_final.objective_value
-        console.print(f"   -> Produccion Bruta (FBA): [bold cyan]{produccion:.4f}[/bold cyan] mmol/gDW/h")
-        flujo_rxn = sol_final.fluxes.get(quimico, 0.0)
-        num_reacciones_afectadas = sum(len(modelo.genes.get_by_id(g).reactions) for g in genes_a_mutar if g in modelo.genes)
-        costo = (num_reacciones_afectadas / 10.0)
-        console.print(f"   -> Penalizacion Proteica: [bold red]-{costo:.2f}[/bold red]")
-        console.print(f"   -> Rendimiento Ajustado: [bold green]{max(0.0, produccion - costo):.4f}[/bold green] mmol/gDW.h")
-        carga = sol_final.fluxes.abs().sum()
-        console.print(f"   -> Carga Metabolica Total: [bold magenta]{carga:.2f}[/bold magenta]")
-        analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
-        mostrar_cinetica_local(modelo, quimico, genes_a_mutar)
+            modelo_mut.genes.get_by_id(gen_id).knock_out() # GPR
+            
+    try:
+        modelo_mut.objective = gen_biomasa
+        sol_bio = modelo_mut.optimize()
+        
+        if sol_bio.status == 'optimal':
+            max_bio = sol_bio.objective_value
+            modelo_mut.reactions.get_by_id(gen_biomasa).lower_bound = max_bio * 0.9
+            modelo_mut.objective = quimico
+            sol_final = modelo_mut.optimize()
+            
+            if sol_final.status == 'optimal':
+                produccion = sol_final.objective_value
+                console.print(f"   -> Produccion Bruta (FBA): [bold cyan]{produccion:.4f}[/bold cyan] mmol/gDW/h")
+                console.print(f"   -> Rendimiento Ajustado: [bold green]{max(0.0, produccion):.4f}[/bold green] mmol/gDW/h")
+                analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
+                mostrar_cinetica_local(modelo, quimico, genes_a_mutar)
+    except Exception as e:
+        console.print(f"[yellow]WARN[/yellow] Analisis fallo: {e}")
 
 def _exportar_resultado_json(modelo_id, quimico, metodo, genes, fitness, seed, parametros_extra=None):
     if not os.path.exists("reportes"): os.makedirs("reportes")
@@ -394,17 +402,83 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
 
 def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
-    if seed is not None: random.seed(seed)
+    if seed is not None: 
+        random.seed(seed)
+        
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
-    if quimico not in modelo.reactions: return
+    if quimico not in modelo.reactions: 
+        return
 
-    max_mutaciones = IntPrompt.ask("Genes a apagar?", default=3); generaciones = IntPrompt.ask("Generaciones?", default=15); pop_size = IntPrompt.ask("Poblacion?", default=30)
+    max_mutaciones = IntPrompt.ask("Genes a apagar?", default=3)
+    generaciones = IntPrompt.ask("Generaciones?", default=15)
+    pop_size = IntPrompt.ask("Poblacion?", default=30)
+    
     gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
     
-    reacciones_activas = {r for r, v in modelo.optimize().fluxes.items() if abs(v) > 0.01 and not r.startswith("EX_")}
-    genes_candidatos = list({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes})
-    if len(genes_candidatos) < 2: return
+    # 1. Filtro de reacciones activas y genes candidatos ordenados (Arregla bug de semilla)
+    solucion_wt = modelo.optimize()
+    reacciones_activas = {r for r, v in solucion_wt.fluxes.items() if abs(v) > 0.01 and not r.startswith("EX_")}
+    genes_candidatos = sorted({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes})
+    
+    if len(genes_candidatos) < 2: 
+        console.print("[red]ERROR[/red] No hay suficientes genes activos.")
+        return
+
+    # 2. Función de evaluación usando FVA (Arregla bug de sobreestimación del vértice)
+    def evaluar(genes):
+        m = modelo.copy()
+        for g in genes:
+            if g in m.genes: 
+                m.genes.get_by_id(g).knock_out()
+        
+        m.objective = gen_biomasa
+        s = m.optimize()
+        
+        if s.status == 'optimal' and s.objective_value > 0.01:
+            try:
+                # FVA mide la producción MÍNIMA GARANTIZADA, no el vértice optimista
+                fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
+                return max(0.0, fva_res.minimum.iloc[0])
+            except:
+                return 0.0
+        return 0.0
+
+    # 3. Población inicial
+    poblacion = []
+    for _ in range(pop_size):
+        genes = random.sample(genes_candidatos, min(max_mutaciones, len(genes_candidatos)))
+        poblacion.append({"genes": genes, "fitness": evaluar(genes)})
+
+    # 4. Bucle evolutivo
+    for gen in track(range(generaciones), description="Evolucionando acoplamiento..."):
+        poblacion.sort(key=lambda x: x["fitness"], reverse=True)
+        mejores = poblacion[:5]
+        nueva = mejores.copy()
+        while len(nueva) < pop_size:
+            p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
+            hijo = list(set(p1[:2] + p2[2:]))
+            if len(hijo) < max_mutaciones: 
+                hijo.append(random.choice(genes_candidatos))
+            nueva.append({"genes": hijo, "fitness": evaluar(hijo)})
+        poblacion = nueva
+
+    # 5. Resultados
+    mejor = sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
+    
+    if mejor["fitness"] > 0.0:
+        console.print(f"\n[green]OK[/green] OptKnock exitoso.")
+        console.print(f"Genes a apagar: [bold cyan]{', '.join(mejor['genes'])}[/bold cyan]")
+        console.print(f"Produccion Garantizada (FVA): [bold yellow]{mejor['fitness']:.4f}[/bold yellow] mmol/gDW/h")
+        
+        try: 
+            _exportar_resultado_json(modelo_id, quimico, "optknock", mejor["genes"], mejor["fitness"], seed)
+        except: 
+            pass
+            
+        analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
+    else:
+        console.print("\n[red]ERROR[/red] No se encontro acoplamiento estricto (FVA = 0).")
 
     def evaluar(genes):
         m = modelo.copy()

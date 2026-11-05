@@ -23,20 +23,7 @@ def get_organism_id(modelo_id: str) -> str:
 
 def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
     if not re.search(r'\d', gen_id): return gen_id, "Nombre comun", "N/A"
-    
-    # 1. LEER DEL CACHE (Lo que ya descargó la terminal)
-    cache_file = "cache_uniprot.json"
-    if os.path.exists(cache_file):
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                cache = json.load(f)
-            clave = f"{organism_id}:{gen_id}"
-            if clave in cache:
-                return cache[clave][0], cache[clave][1], "N/A"
-        except: pass
-
-    # 2. SI NO ESTÁ EN CACHE, BUSCAR EN API (Búsqueda global)
-    url = f'https://rest.uniprot.org/uniprotkb/search?query=organism_id:{organism_id}+AND+"{gen_id}"&fields=gene_names,protein_name&format=json'
+    url = f'https://rest.uniprot.org/uniprotkb/search?query=organism_id:{organism_id}+AND+"{gen_id}"&fields=gene_names,protein_name,xref_rhea&format=json'
     try:
         time.sleep(0.2)
         res = requests.get(url, timeout=5)
@@ -44,7 +31,12 @@ def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
             data = res.json()['results'][0]
             nombre = data.get('genes', [{}])[0].get('geneName', {}).get('value', 'Desconocido')
             funcion = data.get('proteinDescription', {}).get('recommendedName', {}).get('fullName', {}).get('value', 'Desconocida')
-            return nombre, funcion, "N/A"
+            
+            # LEER RHEA IDS CORRECTAMENTE
+            rhea_ids = [x.get('id') for x in data.get('uniProtKBCrossReferences', []) if x.get('database') == 'RHEA']
+            rhea_str = ", ".join(rhea_ids) if rhea_ids else "No en Rhea"
+            
+            return nombre, funcion, rhea_str
     except: pass
     return gen_id, "No encontrado", "N/A"
 
