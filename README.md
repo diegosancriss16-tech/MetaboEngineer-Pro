@@ -314,7 +314,7 @@ Si usas MetaboEngineer Pro en una publicación, cita:
 
 ```bibtex
 @software{metaboengineer2026,
-  author  = {San Cristóbal, Diego},
+  author  = {San Miguel, Diego},
   title   = {MetaboEngineer Pro: A Suite for Metabolic Engineering and Synthetic Biology},
   year    = {2026},
   version = {6.0},
