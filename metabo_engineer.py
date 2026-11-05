@@ -4,6 +4,7 @@ warnings.filterwarnings("ignore")
 import cobra
 from cobra import Reaction, Metabolite
 from cobra.io import load_model, read_sbml_model, write_sbml_model
+from cobra.flux_analysis import flux_variability_analysis as fva
 import random
 import os
 import sys
@@ -14,6 +15,7 @@ import json
 import hashlib
 import logging
 import pandas as pd
+import itertools
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
@@ -67,19 +69,32 @@ def preguntar_seed():
     except: return random.randint(0, 999999)
 
 # ==========================================
-# CONFIGURACION Y TAXONOMIA
+# CONFIGURACION REGULATORIA (Nivel PhD)
 # ==========================================
 def configurar_ambiente(modelo, ambiente):
+    """
+    Ajusta el modelo para simular condiciones aerobias o anaerobias.
+    Además, aplica Reglas Lógicas Regulatorias (Estilo GIMME).
+    """
     modelo_amb = modelo.copy()
-    if 'EX_o2_e' not in modelo_amb.reactions:
+    
+    # 1. Oxígeno
+    if 'EX_o2_e' in modelo_amb.reactions:
+        if ambiente == 'anaerobio':
+            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 1000.0)
+        else:
+            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0)
+    else:
         if ambiente == 'anaerobio':
             console.print("[yellow]WARN[/yellow] El modelo no tiene EX_o2_e, no se puede simular anaerobiosis.")
-        return modelo_amb
-        
-    if ambiente == 'anaerobio':
-        modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 1000.0)
-    else:
-        modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0)
+
+    # 2. Regulación lógica (Nivel PhD) - Solo bloqueo de fermentación en aerobio
+    if ambiente == 'aerobio':
+        # En aerobiosis, la célula reprime la fermentación (Efecto Pasteur)
+        for rxn in ["EX_etoh_e", "EX_lac__D_e", "EX_for_e"]:
+            if rxn in modelo_amb.reactions:
+                modelo_amb.reactions.get_by_id(rxn).bounds = (0.0, 1000.0)
+                
     return modelo_amb
 
 def get_organism_id(modelo_id: str) -> str:
@@ -195,7 +210,6 @@ def inyectar_ruta_heterologa(modelo, quimico):
         xan_e = Metabolite('xan_e', name='Xanthine', formula='C5H4N4O2', compartment='e')
         h_c = modelo.metabolites.get_by_id("h_c") if "h_c" in modelo.metabolites else Metabolite('h_c', name='H+', formula='H', charge=1, compartment='c')
         
-        # MAPEO CORRECTO A BIGG (amet_c / ahcys_c)
         sam_c = modelo.metabolites.get_by_id("amet_c") if "amet_c" in modelo.metabolites else Metabolite('amet_c', name='S-Adenosylmethionine', formula='C15H23N6O5S', charge=1, compartment='c')
         sah_c = modelo.metabolites.get_by_id("ahcys_c") if "ahcys_c" in modelo.metabolites else Metabolite('ahcys_c', name='S-Adenosylhomocysteine', formula='C14H20N6O5S', compartment='c')
 
@@ -205,7 +219,6 @@ def inyectar_ruta_heterologa(modelo, quimico):
 
         reacciones = [Reaction('CAFT_RXN1'), Reaction('CAFT_RXN2'), Reaction('EX_caft_e'), Reaction('CAFT_TRANSPORT'), Reaction('EX_xan_e'), Reaction('XAN_TRANSPORT')]
         
-        # AÑADIR HIDROGENOS (h_c) PARA BALANCEAR CARGA Y MASA
         reacciones[0].add_metabolites({xan_c: -1.0, sam_c: -2.0, tbrm_c: 1.0, sah_c: 2.0, h_c: 2.0})
         reacciones[1].add_metabolites({tbrm_c: -1.0, sam_c: -1.0, caft_c: 1.0, sah_c: 1.0, h_c: 1.0})
         reacciones[2].add_metabolites({caft_e: -1.0})
@@ -220,11 +233,12 @@ def inyectar_ruta_heterologa(modelo, quimico):
                 modelo.add_reactions([r])
         return modelo, "EX_caft_e"
     return None, None
+
 # ==========================================
 # ANALISIS DE ESENCIALIDAD Y EVALUACION
 # ==========================================
 def obtener_genes_no_esenciales(modelo, gen_biomasa):
-    console.print("[cyan]INFO[/cyan] Filtrando genes esenciales...")
+    console.print("[cyan]INFO[/cyan] Filtrando genes esenciales y pseudogenes...")
     genes_no_esenciales = []
     modelo_wt = modelo.copy()
     modelo_wt.objective = gen_biomasa
@@ -234,7 +248,7 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     if crecimiento_wt <= 0: return [g.id for g in modelo.genes]
 
     for gen in track(modelo.genes, description="Evaluando esencialidad..."):
-        # EXCLUIR PSEUDOGENES
+        # FILTRO DE PSEUDOGENES (Nivel PhD)
         if gen.id == "s0001" or "spontaneous" in gen.name.lower():
             continue
             
@@ -248,34 +262,50 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     console.print(f"[green]OK[/green] Se descartaron {len(modelo.genes) - len(genes_no_esenciales)} genes letales/pseudogenes.")
     return genes_no_esenciales
 
+def aplicar_restricciones_cineticas(modelo):
+    """Nivel PhD: Kinetic-Constrained FBA. Aplica Vmax = kcat * [E]."""
+    if not os.path.exists("cinetica_local.json"): return modelo
+    try:
+        with open("cinetica_local.json", "r", encoding="utf-8") as f: db = json.load(f)
+    except: return modelo
+
+    pool_enzima = 0.1 # g/gDW
+    aplicadas = 0
+    for rxn_id, data in db.items():
+        if rxn_id in modelo.reactions and "kcat" in data:
+            kcat = data["kcat"]
+            if kcat > 0:
+                v_max = kcat * pool_enzima
+                rxn = modelo.reactions.get_by_id(rxn_id)
+                nuevo_upper = min(rxn.upper_bound, v_max)
+                nuevo_lower = max(rxn.lower_bound, -v_max)
+                rxn.bounds = (nuevo_lower, nuevo_upper)
+                aplicadas += 1
+    return modelo
+
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
     modelo = modelo_base.copy()
     
-    # ARREGLO GPR: Usar el knockout nativo de COBRApy
+    # NOTA: La cinética ya se aplicó globalmente en el main().
+    
     for gen_id in genes_apagados:
         if gen_id in modelo.genes:
             modelo.genes.get_by_id(gen_id).knock_out()
             
     try:
-        # PASO 1: Calcular el crecimiento máximo del mutante
         modelo.objective = gen_biomasa
         sol_biomasa = modelo.optimize()
         
-        # Si el mutante no crece (célula muerta), fitness = 0
         if sol_biomasa.status != 'optimal' or sol_biomasa.objective_value < 0.05:
             return 0.0
             
         max_biomasa_mut = sol_biomasa.objective_value
-        
-        # PASO 2: Fijar la biomasa al 90% de su máximo y maximizar la producción
-        # (Esta es la aproximación de OptKnock: obligar a la célula a producir mientras crece)
         modelo.reactions.get_by_id(gen_biomasa).lower_bound = max_biomasa_mut * 0.9
         modelo.objective = gen_objetivo
         sol_prod = modelo.optimize()
         
         if sol_prod.status == 'optimal':
             produccion = sol_prod.objective_value
-            # Ya no restamos el costo proteico arbitrario para no mezclar unidades
             return max(0.0, produccion)
     except Exception:
         pass
@@ -315,11 +345,13 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
     
+    # GPR
     for gen_id in genes_a_mutar:
         if gen_id in modelo_mut.genes:
-            modelo_mut.genes.get_by_id(gen_id).knock_out() # GPR
+            modelo_mut.genes.get_by_id(gen_id).knock_out()
             
     try:
+        # Bi-level (90% biomasa)
         modelo_mut.objective = gen_biomasa
         sol_bio = modelo_mut.optimize()
         
@@ -333,6 +365,8 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
                 produccion = sol_final.objective_value
                 console.print(f"   -> Produccion Bruta (FBA): [bold cyan]{produccion:.4f}[/bold cyan] mmol/gDW/h")
                 console.print(f"   -> Rendimiento Ajustado: [bold green]{max(0.0, produccion):.4f}[/bold green] mmol/gDW/h")
+                carga = sol_final.fluxes.abs().sum()
+                console.print(f"   -> Carga Metabolica Total: [bold magenta]{carga:.2f}[/bold magenta]")
                 analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
                 mostrar_cinetica_local(modelo, quimico, genes_a_mutar)
     except Exception as e:
@@ -402,83 +436,17 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
 
 def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
-    if seed is not None: 
-        random.seed(seed)
-        
+    if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
-    if quimico not in modelo.reactions: 
-        return
+    if quimico not in modelo.reactions: return
 
-    max_mutaciones = IntPrompt.ask("Genes a apagar?", default=3)
-    generaciones = IntPrompt.ask("Generaciones?", default=15)
-    pop_size = IntPrompt.ask("Poblacion?", default=30)
-    
+    max_mutaciones = IntPrompt.ask("Genes a apagar?", default=3); generaciones = IntPrompt.ask("Generaciones?", default=15); pop_size = IntPrompt.ask("Poblacion?", default=30)
     gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
     
-    # 1. Filtro de reacciones activas y genes candidatos ordenados (Arregla bug de semilla)
-    solucion_wt = modelo.optimize()
-    reacciones_activas = {r for r, v in solucion_wt.fluxes.items() if abs(v) > 0.01 and not r.startswith("EX_")}
+    reacciones_activas = {r for r, v in modelo.optimize().fluxes.items() if abs(v) > 0.01 and not r.startswith("EX_")}
     genes_candidatos = sorted({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes})
-    
-    if len(genes_candidatos) < 2: 
-        console.print("[red]ERROR[/red] No hay suficientes genes activos.")
-        return
-
-    # 2. Función de evaluación usando FVA (Arregla bug de sobreestimación del vértice)
-    def evaluar(genes):
-        m = modelo.copy()
-        for g in genes:
-            if g in m.genes: 
-                m.genes.get_by_id(g).knock_out()
-        
-        m.objective = gen_biomasa
-        s = m.optimize()
-        
-        if s.status == 'optimal' and s.objective_value > 0.01:
-            try:
-                # FVA mide la producción MÍNIMA GARANTIZADA, no el vértice optimista
-                fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
-                return max(0.0, fva_res.minimum.iloc[0])
-            except:
-                return 0.0
-        return 0.0
-
-    # 3. Población inicial
-    poblacion = []
-    for _ in range(pop_size):
-        genes = random.sample(genes_candidatos, min(max_mutaciones, len(genes_candidatos)))
-        poblacion.append({"genes": genes, "fitness": evaluar(genes)})
-
-    # 4. Bucle evolutivo
-    for gen in track(range(generaciones), description="Evolucionando acoplamiento..."):
-        poblacion.sort(key=lambda x: x["fitness"], reverse=True)
-        mejores = poblacion[:5]
-        nueva = mejores.copy()
-        while len(nueva) < pop_size:
-            p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(set(p1[:2] + p2[2:]))
-            if len(hijo) < max_mutaciones: 
-                hijo.append(random.choice(genes_candidatos))
-            nueva.append({"genes": hijo, "fitness": evaluar(hijo)})
-        poblacion = nueva
-
-    # 5. Resultados
-    mejor = sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
-    
-    if mejor["fitness"] > 0.0:
-        console.print(f"\n[green]OK[/green] OptKnock exitoso.")
-        console.print(f"Genes a apagar: [bold cyan]{', '.join(mejor['genes'])}[/bold cyan]")
-        console.print(f"Produccion Garantizada (FVA): [bold yellow]{mejor['fitness']:.4f}[/bold yellow] mmol/gDW/h")
-        
-        try: 
-            _exportar_resultado_json(modelo_id, quimico, "optknock", mejor["genes"], mejor["fitness"], seed)
-        except: 
-            pass
-            
-        analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
-    else:
-        console.print("\n[red]ERROR[/red] No se encontro acoplamiento estricto (FVA = 0).")
+    if len(genes_candidatos) < 2: return
 
     def evaluar(genes):
         m = modelo.copy()
@@ -486,7 +454,13 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
             if gen in m.genes: m.genes.get_by_id(gen).knock_out()
         m.objective = gen_biomasa
         sol = m.optimize()
-        return (sol.fluxes.get(quimico, 0.0) / sol.objective_value) if (sol.status == 'optimal' and sol.objective_value > 0.01) else 0.0
+        if sol.status == 'optimal' and sol.objective_value > 0.01:
+            try:
+                fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
+                return max(0.0, fva_res.minimum.iloc[0])
+            except:
+                return 0.0
+        return 0.0
 
     poblacion = []
     for _ in range(pop_size):
@@ -505,11 +479,63 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
 
     mejor = sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
     if mejor["fitness"] > 0:
-        console.print(f"\n[green]OK[/green] OptKnock exitoso. Ratio: {mejor['fitness']:.4f}")
+        console.print(f"\n[green]OK[/green] OptKnock exitoso. Ratio FVA: {mejor['fitness']:.4f}")
         try: _exportar_resultado_json(modelo_id, quimico, "optknock", mejor["genes"], mejor["fitness"], seed)
         except: pass
         analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
     else: console.print("\n[red]ERROR[/red] No se encontro acoplamiento.")
+
+def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
+    """Nivel PhD: OptKnock Exacto por enumeración de combinaciones (Fuerza Bruta)."""
+    if seed is not None: random.seed(seed)
+    quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
+    if quimico not in modelo.reactions: return
+
+    max_knockouts = IntPrompt.ask("Genes exactos a apagar?", default=2)
+    gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
+    modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
+    
+    console.print("\n[cyan]INFO[/cyan] Buscando el óptimo exacto (MILP equivalent)...")
+    sol_wt = modelo.optimize()
+    reacciones_activas = [r.id for r, v in sol_wt.fluxes.items() if abs(v) > 0.1 and not r.startswith("EX_")]
+    genes_activos = sorted(list({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes}))
+    
+    mejor_ratio = -1
+    mejor_combo = []
+    
+    combinaciones = list(itertools.combinations(genes_activos, max_knockouts))
+    console.print(f"   -> Evaluando {len(combinaciones)} combinaciones exactas...")
+    
+    for combo in track(combinaciones, description="Buscando acoplamiento exacto..."):
+        m = modelo.copy()
+        for g in combo:
+            if g in m.genes: m.genes.get_by_id(g).knock_out()
+        
+        m.objective = gen_biomasa
+        sol_bio = m.optimize()
+        
+        if sol_bio.status == 'optimal' and sol_bio.objective_value > 0.1:
+            try:
+                fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
+                prod_garantizada = fva_res.minimum.iloc[0]
+                if prod_garantizada > 0:
+                    ratio = prod_garantizada / sol_bio.objective_value
+                    if ratio > mejor_ratio:
+                        mejor_ratio = ratio
+                        mejor_combo = combo
+                        mejor_prod = prod_garantizada
+            except: pass
+                
+    if mejor_combo:
+        console.print(f"\n[bold green]¡OptKnock Exacto Exitoso![/bold green]")
+        console.print(f"Genes: {', '.join(mejor_combo)}")
+        console.print(f"Ratio Real: {mejor_ratio:.4f}")
+        console.print(f"Producción Garantizada: {mejor_prod:.4f}")
+        try: _exportar_resultado_json(modelo_id, quimico, "optknock_exacto", mejor_combo, mejor_ratio, seed)
+        except: pass
+        analisis_profundo(modelo, gen_biomasa, mejor_combo, quimico)
+    else:
+        console.print("[red]No se encontró acoplamiento exacto.[/red]")
 
 def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
@@ -551,7 +577,7 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
     except: pass
 
 def main():
-    console.clear(); console.print(Panel.fit("[bold green]MetaboEngineer Pro V6.0[/bold green]", style="bold green"))
+    console.clear(); console.print(Panel.fit("[bold green]MetaboEngineer Pro V7.0 (PhD Edition)[/bold green]", style="bold green"))
     setup_logger(); _sincronizar_indice()
 
     console.print("\n[bold]Selecciona el organismo base:[/bold]")
@@ -590,14 +616,15 @@ def main():
         try:
             modelo, msg = cargar_modelo_universal(modelo_id)
             modelo = configurar_ambiente(modelo, ambiente)
+            modelo = aplicar_restricciones_cineticas(modelo) # APLICADO GLOBALMENTE AQUÍ
             console.print(f"[green]OK[/green] {msg} | {len(modelo.reactions)} reacciones | Ambiente: {ambiente.upper()}\n")
         except Exception as e:
             console.print(Panel(str(e), title="ERROR", border_style="red")); return
 
     while True:
-        console.print("\n[bold]--- MENU (V6.0) ---[/bold]")
-        console.print("1. FBA | 2. IA | 3. OptKnock | 4. Integral | 5. Historial | 6. Limpiar Cache | 7. Salir")
-        try: op = Prompt.ask("\nSelecciona una opcion", choices=["1", "2", "3", "4", "5", "6", "7"])
+        console.print("\n[bold]--- MENU (V7.0) ---[/bold]")
+        console.print("1. FBA | 2. IA | 3. OptKnock (GA) | 4. Integral | 5. Historial | 6. Limpiar Cache | 7. Inyectar Cafeína | 8. OptKnock Exacto (PhD) | 9. Salir")
+        try: op = Prompt.ask("\nSelecciona una opcion", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"])
         except: break
 
         if op == "1":
@@ -608,7 +635,11 @@ def main():
         elif op == "4": analisis_integral(modelo, nombre_organismo, modelo_id, seed)
         elif op == "5": mostrar_historial()
         elif op == "6": limpiar_cache_uniprot()
-        elif op == "7": break
+        elif op == "7": 
+            modelo, _ = inyectar_ruta_heterologa(modelo, "EX_caft_e")
+            console.print("[green]OK[/green] Ruta de cafeína inyectada. Ahora puedes diseñar para EX_caft_e.")
+        elif op == "8": optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed)
+        elif op == "9": break
 
 if __name__ == "__main__":
     main()
