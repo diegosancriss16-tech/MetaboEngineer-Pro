@@ -22,28 +22,30 @@ def get_organism_id(modelo_id: str) -> str:
     return "83333"
 
 def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
-    if not re.search(r'\d', gen_id):
-        return gen_id, "Nombre comun", "N/A"
+    if not re.search(r'\d', gen_id): return gen_id, "Nombre comun", "N/A"
+    
+    # 1. LEER DEL CACHE (Lo que ya descargó la terminal)
+    cache_file = "cache_uniprot.json"
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cache = json.load(f)
+            clave = f"{organism_id}:{gen_id}"
+            if clave in cache:
+                return cache[clave][0], cache[clave][1], "N/A"
+        except: pass
 
-    # BÚSQUEDA GLOBAL CORREGIDA
-    url = (f"https://rest.uniprot.org/uniprotkb/search?"
-           f"query=organism_id:{organism_id}+AND+{gen_id}"
-           f"&fields=gene_names,protein_name,xref_rhea&format=json")
+    # 2. SI NO ESTÁ EN CACHE, BUSCAR EN API (Búsqueda global)
+    url = f'https://rest.uniprot.org/uniprotkb/search?query=organism_id:{organism_id}+AND+"{gen_id}"&fields=gene_names,protein_name&format=json'
     try:
         time.sleep(0.2)
         res = requests.get(url, timeout=5)
         if res.status_code == 200 and res.json().get('results'):
             data = res.json()['results'][0]
             nombre = data.get('genes', [{}])[0].get('geneName', {}).get('value', 'Desconocido')
-            funcion = (data.get('proteinDescription', {})
-                       .get('recommendedName', {})
-                       .get('fullName', {})
-                       .get('value', 'Desconocida'))
-            rhea_ids = [x.get('id') for x in data.get('uniProtKBCrossReferences', [])
-                        if x.get('database') == 'RHEA']
-            return nombre, funcion, ", ".join(rhea_ids) if rhea_ids else "No en Rhea"
-    except:
-        pass
+            funcion = data.get('proteinDescription', {}).get('recommendedName', {}).get('fullName', {}).get('value', 'Desconocida')
+            return nombre, funcion, "N/A"
+    except: pass
     return gen_id, "No encontrado", "N/A"
 
 def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness):
