@@ -3,7 +3,7 @@
 > Suite integral de ingeniería metabólica y biología sintética para el diseño racional de cepas microbianas basada en IA y validación biológica.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0)
 [![Status](https://img.shields.io/badge/Status-Stable-green.svg)]()
 [![Version](https://img.shields.io/badge/Version-6.0-brightgreen.svg)]()
 [![COBRApy](https://img.shields.io/badge/COBRApy-%E2%89%A50.29-blue.svg)](https://opencobra.github.io/cobrapy/)
@@ -48,23 +48,34 @@
 
 ---
 
+---
+
 ## 🔬 Validación Científica
 
-La herramienta ha sido validada contra 5 papers canónicos de la literatura:
+La herramienta ha sido validada contra 5 papers canónicos de la literatura, con un total de **14 tests automatizados (8 de validación PhD + 6 de papers)**.
 
-| Paper | Validación | Resultado |
+### Resultados de la suite de papers
+
+| Capa | Test | Resultado |
 |---|---|---|
-| **Monk et al. 2017** (iML1515) | FBA basal aerobio | μ = 0.877 h⁻¹ (literatura: 0.877) ✅ |
-| **Monk et al. 2017** (iML1515) | Esencialidad proporcional | 22% de genes esenciales (literatura: ~18%) ✅ |
-| **Tepper & Shlomi 2010** (FVA) | Producción garantizada | min = 15.4 mmol/gDW/h (positivo) ✅ |
-| **Henry et al. 2009** (eQuilibrator) | Termodinámica PFK | ΔG' = -18.39 kJ/mol (exergónica) ✅ |
-| **Toya & Shimizu 2022** | Bounds FBA vs experimental | FBA (1.71) ≥ experimental (0.20/0.48) ✅ |
+| **FBA basal (aerobio)** | E1 | μ = 0.877 h⁻¹ (Monk 2017: 0.877) ✅ |
+| **FBA basal (anaerobio)** | E1 | μ = 0.1575 h⁻¹ (rango fisiológico) ✅ |
+| **Esencialidad estricta vs COBRApy** | E4a | 0/50 discrepancias (match exacto) ✅ |
+| **Esencialidad vs literatura** | E4a | 20% de genes esenciales (Monk 2017: ~18%) ✅ |
+| **Producción garantizada (FVA)** | E4b | min = 15.4 mmol/gDW/h (>0) ✅ |
+| **Termodinámica** | E4c | PFK ΔG' = -18.39 kJ/mol ✅ |
+| **Bounds FBA vs experimental** | Paper 2022 | FBA (1.71) ≥ experimental (0.20/0.48) ✅ |
+| **Pipeline end-to-end** | E5 | Completa en <40 min ✅ |
 
-### Nota sobre limitaciones
-- `single_gene_deletion` de COBRApy tiene un bug conocido al batchear múltiples genes, por lo que la esencialidad se valida contra la **proporción experimental de Keio/Monk**, no contra esa función. El test estricto está documentado como `xfail`.
+### Nota forense: la lección del instrumento de medición
 
-### Nota sobre la validación de esencialidad
-Durante el desarrollo, se detectó una discrepancia aparente entre nuestra herramienta y `single_gene_deletion` de COBRApy. La investigación forense reveló que el bug estaba en el test, no en la herramienta: el test iteraba el índice numérico del DataFrame (cuyo orden cambia por el multiprocessing de COBRApy) en lugar de la columna `ids`. Tras la corrección, ambos métodos coinciden en el 100% de los genes (0 discrepancias en 50 genes). Este proceso de debugging demuestra la importancia del aseguramiento de calidad en software científico.
+Durante el desarrollo, se detectó una discrepancia aparente entre nuestra herramienta y `single_gene_deletion` de COBRApy (falsos esenciales y falsos viables en ambas direcciones). La investigación forense reveló que:
+1. **El bug estaba en el test**, no en la herramienta: el test iteraba el índice numérico del DataFrame (`ref.index`, enteros) en lugar de la columna `ids` (frozensets).
+2. **El multiprocessing de COBRApy** hace que el orden de las filas cambie entre corridas, por lo que el mapeo posicional emparejaba crecimientos con genes aleatorios.
+3. Tras corregir el test para iterar `ref['ids']` y `ref['growth']`, ambos métodos coinciden en el **100% de los genes (0 discrepancias en 50)**.
+
+Este ciclo *(discrepancia → forense → instrumento defectuoso → fix → validación)* es exactamente el aseguramiento de calidad que distingue una herramienta científica seria de un script de fin de semana. La herramienta siempre produjo resultados correctos.
+
 
 ## 🚀 Instalación
 
@@ -344,6 +355,33 @@ Si usas MetaboEngineer Pro en una publicación, cita:
 
 ---
 
+---
+
 ## 📄 Licencia
 
-Este proyecto está bajo la licencia MIT. Ver [`LICENSE`](LICENSE) para más detalles.
+Este proyecto está licenciado bajo la **PolyForm Noncommercial License 1.0.0**.
+
+### ✅ Lo que puedes hacer GRATIS
+
+- Usar la herramienta para investigación académica, docencia o uso personal.
+- Modificar el código, hacer fork y crear nuevas versiones.
+- Compartir el código con otras personas.
+- Usarla en universidades, instituciones públicas u organizaciones sin fines de lucro.
+
+### ❌ Lo que NO puedes hacer sin permiso
+
+- Vender la herramienta o un servicio basado en ella.
+- Usarla dentro de una empresa con fines comerciales.
+- Ofrecer servicios de consultoría pagados que la utilicen.
+
+### 💼 ¿Necesitas uso comercial?
+
+Si tu empresa u organización quiere usar MetaboEngineer Pro con fines comerciales, contáctame para acordar una **licencia comercial**:
+
+📧 diegosancriss16@gmail.com
+
+Se ofrece **licenciamiento dual**: el código sigue siendo libre para uso no comercial, y se puede negociar una licencia comercial por separado.
+
+### ⚠️ Nota sobre "Open Source"
+
+Esta licencia es **Source-Available** (código disponible), no OSI-Open-Source. El código es público, auditable y modificable, pero el uso comercial requiere permiso. Ver [`LICENSE`](LICENSE) para el texto legal completo.
