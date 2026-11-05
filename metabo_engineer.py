@@ -14,7 +14,6 @@ import json
 import hashlib
 import logging
 import pandas as pd
-from requests.exceptions import RequestException
 from datetime import datetime
 from rich.console import Console
 from rich.table import Table
@@ -24,6 +23,7 @@ from rich.panel import Panel
 
 console = Console()
 
+# --- IMPORTACION PROTEGIDA DE MODULOS EXTERNOS ---
 MODULOS_EXTERNOS_DISPONIBLES = False
 try:
     from visualizador_universal import generar_mapa_universal
@@ -47,25 +47,13 @@ ORGANISMOS = {
     "5": {"nombre": "Otro (ingresar ID)", "id": None}
 }
 
-COSTOS_PROTEICOS = {"CAFT_RXN1": 0.8, "CAFT_RXN2": 0.8, "EX_succ_e": 0.1, "EX_etoh_e": 0.2, "default": 0.3}
 _RUTA_HISTORIAL_CSV = "reportes/historial.csv"
+_RUTA_CACHE_UNIPROT = "cache_uniprot.json"
+_RUTA_INDICE = "modelos/_index.json"
 
 # ==========================================
-# NUEVA FUNCION: CONFIGURAR OXIGENO
+# LOGGING Y SEMILLA
 # ==========================================
-def configurar_ambiente(modelo, ambiente):
-    """Ajusta el modelo para simular condiciones aerobias o anaerobias."""
-    modelo_amb = modelo.copy()
-    # En COBRApy, la reacción de intercambio de oxígeno suele ser EX_o2_e
-    if 'EX_o2_e' in modelo_amb.reactions:
-        if ambiente == 'anaerobio':
-            # Límite inferior a 0 (o casi 0) para bloquear la entrada de oxígeno
-            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 1000.0)
-        else:
-            # Restaurar a aerobio (permitir entrada)
-            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0)
-    return modelo_amb
-
 def setup_logger():
     if not os.path.exists("logs"): os.makedirs("logs")
     log_file = f"logs/run_{datetime.now():%Y%m%d_%H%M%S}.log"
@@ -75,9 +63,21 @@ def setup_logger():
 def preguntar_seed():
     try:
         entrada = Prompt.ask("Semilla aleatoria (Enter = aleatoria)", default="").strip()
-        if entrada == "": return random.randint(0, 999999)
-        return int(entrada)
+        return int(entrada) if entrada else random.randint(0, 999999)
     except: return random.randint(0, 999999)
+
+# ==========================================
+# CONFIGURACION Y TAXONOMIA
+# ==========================================
+def configurar_ambiente(modelo, ambiente):
+    """Ajusta el modelo para simular condiciones aerobias o anaerobias."""
+    modelo_amb = modelo.copy()
+    if 'EX_o2_e' in modelo_amb.reactions:
+        if ambiente == 'anaerobio':
+            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 1000.0)
+        else:
+            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0)
+    return modelo_amb
 
 def get_organism_id(modelo_id: str) -> str:
     if not modelo_id: return "83333"
@@ -87,7 +87,9 @@ def get_organism_id(modelo_id: str) -> str:
     if "iEK1008" in modelo_id: return "1773"
     return "83333"
 
-_RUTA_CACHE_UNIPROT = "cache_uniprot.json"
+# ==========================================
+# CACHE UNIPROT
+# ==========================================
 def _cargar_cache_uniprot():
     if not os.path.exists(_RUTA_CACHE_UNIPROT): return {}
     try:
@@ -119,28 +121,16 @@ def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
                 result = data['results'][0]
                 nombre_gen = result.get('genes', [{}])[0].get('geneName', {}).get('value', 'Desconocido')
                 nombre_proteina = result.get('proteinDescription', {}).get('recommendedName', {}).get('fullName', {}).get('value', 'Funcion desconocida')
-                cache[clave] = [nombre_gen, nombre_proteina]
-                _guardar_cache_uniprot(cache)
+                if nombre_gen != 'Desconocido':
+                    cache[clave] = [nombre_gen, nombre_proteina]
+                    _guardar_cache_uniprot(cache)
                 return nombre_gen, nombre_proteina
     except: pass
     return gen_id, "No encontrado en UniProt"
 
-def _exportar_resultado_json(modelo_id, quimico, metodo, genes, fitness, seed, parametros_extra=None):
-    if not os.path.exists("reportes"): os.makedirs("reportes")
-    fecha = datetime.now()
-    resultado = {"fecha": fecha.isoformat(), "modelo": modelo_id, "quimico": quimico, "metodo": metodo, "fitness": round(fitness, 6), "genes_knockout": list(genes), "seed": seed, "parametros": parametros_extra or {}}
-    with open(f"reportes/{metodo}_{modelo_id}_{quimico}_{fecha.strftime('%Y%m%d_%H%M%S')}.json", "w", encoding="utf-8") as f: json.dump(resultado, f, indent=2)
-    fila = {"fecha": fecha.strftime("%Y-%m-%d %H:%M:%S"), "modelo": modelo_id, "quimico": quimico, "metodo": metodo, "fitness": round(fitness, 6), "genes": ";".join(genes), "seed": seed}
-    df = pd.DataFrame([fila])
-    df.to_csv(_RUTA_HISTORIAL_CSV, mode="a", header=not os.path.exists(_RUTA_HISTORIAL_CSV), index=False)
-
-def mostrar_historial():
-    if not os.path.exists(_RUTA_HISTORIAL_CSV): return
-    df = pd.read_csv(_RUTA_HISTORIAL_CSV)
-    if df.empty: return
-    console.print(df.tail(10).to_string())
-
-_RUTA_INDICE = "modelos/_index.json"
+# ==========================================
+# DESCARGAS E INDEXACION
+# ==========================================
 def _sha256_archivo(ruta):
     h = hashlib.sha256()
     with open(ruta, "rb") as f:
@@ -190,6 +180,9 @@ def cargar_modelo_universal(modelo_id):
         return modelo, f"Modelo '{modelo_id}' descargado via cobrapy."
     except Exception as e: raise Exception(f"No se pudo cargar '{modelo_id}': {e}")
 
+# ==========================================
+# INYECCION HETEROLOGA
+# ==========================================
 def inyectar_ruta_heterologa(modelo, quimico):
     if quimico == "EX_caft_e":
         for met in [Metabolite('caft_c', name='Caffeine', compartment='c'), Metabolite('tbrm_c', name='Theobromine', compartment='c'), Metabolite('xan_c', name='Xanthine', compartment='c'), Metabolite('caft_e', name='Caffeine', compartment='e'), Metabolite('xan_e', name='Xanthine', compartment='e')]:
@@ -207,6 +200,48 @@ def inyectar_ruta_heterologa(modelo, quimico):
                 modelo.add_reactions([r])
         return modelo, "EX_caft_e"
     return None, None
+
+# ==========================================
+# ANALISIS DE ESENCIALIDAD Y EVALUACION
+# ==========================================
+def obtener_genes_no_esenciales(modelo, gen_biomasa):
+    """Elimina genes que, si se apagan, matan a la célula (esenciales)."""
+    console.print("[cyan]INFO[/cyan] Filtrando genes esenciales (esto puede tardar un poco)...")
+    genes_no_esenciales = []
+    modelo_wt = modelo.copy()
+    modelo_wt.objective = gen_biomasa
+    sol_wt = modelo_wt.optimize()
+    crecimiento_wt = sol_wt.objective_value if sol_wt.status == 'optimal' else 0.0
+    
+    if crecimiento_wt <= 0: return [g.id for g in modelo.genes]
+
+    for gen in track(modelo.genes, description="Evaluando esencialidad..."):
+        m = modelo.copy()
+        m.genes.get_by_id(gen.id).knock_out()
+        m.objective = gen_biomasa
+        sol = m.optimize()
+        if sol.status == 'optimal' and sol.objective_value > (crecimiento_wt * 0.05):
+            genes_no_esenciales.append(gen.id)
+            
+    console.print(f"[green]OK[/green] Se descartaron {len(modelo.genes) - len(genes_no_esenciales)} genes letales.")
+    return genes_no_esenciales
+
+def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
+    modelo = modelo_base.copy()
+    for gen_id in genes_apagados:
+        if gen_id in modelo.genes:
+            for reaccion in modelo.genes.get_by_id(gen_id).reactions: reaccion.bounds = (0, 0)
+    try:
+        modelo.reactions.get_by_id(gen_biomasa).bounds = (0.1, 1000.0)
+        modelo.objective = gen_objetivo
+        solucion = modelo.optimize()
+        if solucion.status == 'optimal':
+            produccion = solucion.objective_value
+            num_reacciones_afectadas = sum(len(modelo.genes.get_by_id(g).reactions) for g in genes_apagados if g in modelo.genes)
+            costo = (num_reacciones_afectadas / 10.0)
+            return max(0.0, produccion - costo)
+    except: pass
+    return 0.0
 
 def analizar_termodinamica_cepa(modelo, quimico, genes_knockout):
     if not MODULOS_EXTERNOS_DISPONIBLES: return
@@ -238,22 +273,6 @@ def mostrar_cinetica_local(modelo, quimico, genes_knockout):
             encontrados += 1
     if encontrados > 0: console.print(tabla)
 
-def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
-    modelo = modelo_base.copy()
-    for gen_id in genes_apagados:
-        if gen_id in modelo.genes:
-            for reaccion in modelo.genes.get_by_id(gen_id).reactions: reaccion.bounds = (0, 0)
-    try:
-        modelo.reactions.get_by_id(gen_biomasa).bounds = (0.1, 1000.0)
-        modelo.objective = gen_objetivo
-        solucion = modelo.optimize()
-        if solucion.status == 'optimal':
-            produccion = solucion.objective_value
-            costo = solucion.fluxes.get(gen_objetivo, 0.0) * COSTOS_PROTEICOS.get(gen_objetivo, COSTOS_PROTEICOS["default"])
-            return max(0.0, produccion - costo)
-    except: pass
-    return 0.0
-
 def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
@@ -266,31 +285,47 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
         produccion = sol_final.objective_value
         console.print(f"   -> Produccion Bruta (FBA): [bold cyan]{produccion:.4f}[/bold cyan] mmol/gDW/h")
         flujo_rxn = sol_final.fluxes.get(quimico, 0.0)
-        costo = flujo_rxn * COSTOS_PROTEICOS.get(quimico, COSTOS_PROTEICOS["default"])
+        num_reacciones_afectadas = sum(len(modelo.genes.get_by_id(g).reactions) for g in genes_a_mutar if g in modelo.genes)
+        costo = (num_reacciones_afectadas / 10.0)
         console.print(f"   -> Penalizacion Proteica: [bold red]-{costo:.2f}[/bold red]")
-        console.print(f"   -> Rendimiento Ajustado: [bold green]{max(0.0, produccion - costo):.4f}[/bold green] mmol/gDW/h")
+        console.print(f"   -> Rendimiento Ajustado: [bold green]{max(0.0, produccion - costo):.4f}[/bold green] mmol/gDW.h")
         carga = sol_final.fluxes.abs().sum()
         console.print(f"   -> Carga Metabolica Total: [bold magenta]{carga:.2f}[/bold magenta]")
         analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
         mostrar_cinetica_local(modelo, quimico, genes_a_mutar)
 
+def _exportar_resultado_json(modelo_id, quimico, metodo, genes, fitness, seed, parametros_extra=None):
+    if not os.path.exists("reportes"): os.makedirs("reportes")
+    fecha = datetime.now()
+    resultado = {"fecha": fecha.isoformat(), "modelo": modelo_id, "quimico": quimico, "metodo": metodo, "fitness": round(fitness, 6), "genes_knockout": list(genes), "seed": seed, "parametros": parametros_extra or {}}
+    with open(f"reportes/{metodo}_{modelo_id}_{quimico}_{fecha.strftime('%Y%m%d_%H%M%S')}.json", "w", encoding="utf-8") as f: json.dump(resultado, f, indent=2)
+    fila = {"fecha": fecha.strftime("%Y-%m-%d %H:%M:%S"), "modelo": modelo_id, "quimico": quimico, "metodo": metodo, "fitness": round(fitness, 6), "genes": ";".join(genes), "seed": seed}
+    df = pd.DataFrame([fila])
+    df.to_csv(_RUTA_HISTORIAL_CSV, mode="a", header=not os.path.exists(_RUTA_HISTORIAL_CSV), index=False)
+
+def mostrar_historial():
+    if not os.path.exists(_RUTA_HISTORIAL_CSV): return
+    df = pd.read_csv(_RUTA_HISTORIAL_CSV)
+    if df.empty: return
+    console.print(df.tail(10).to_string())
+
+# ==========================================
+# ALGORITMOS
+# ==========================================
 def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
-    quimico = Prompt.ask("Quimico objetivo (ej. EX_succ_e, EX_caft_e)", default="EX_succ_e").strip()
-    if quimico not in modelo.reactions:
-        if quimico == "EX_caft_e" and Prompt.ask("Inyectar ruta?", choices=["S", "N"], default="S").upper() == "S":
-            modelo, quimico = inyectar_ruta_heterologa(modelo, quimico)
-            if modelo is None: return
-        else: return
+    quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
+    if quimico not in modelo.reactions: return
 
     gens = IntPrompt.ask("Generaciones", default=10); pop_size = IntPrompt.ask("Poblacion", default=20); mutaciones = IntPrompt.ask("Genes a apagar", default=4)
     gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
-    todos_los_genes = [g.id for g in modelo.genes]
+    
+    todos_los_genes = obtener_genes_no_esenciales(modelo, gen_biomasa)
 
     poblacion = []
     for _ in range(pop_size):
-        gm = random.sample(todos_los_genes, mutaciones)
+        gm = random.sample(todos_los_genes, min(mutaciones, len(todos_los_genes)))
         poblacion.append({"genes": gm, "fitness": evaluar_bacteria(modelo, gm, quimico, gen_biomasa)})
     for gen in track(range(gens), description="Evolucionando..."):
         poblacion.sort(key=lambda x: x["fitness"], reverse=True)
@@ -307,15 +342,11 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     console.print(f"\n[green]OK[/green] Diseno completado. Fitness: {mejor['fitness']:.4f}\n")
     
     id_uniprot = get_organism_id(modelo_id)
-    console.print("[cyan]INFO[/cyan] Traduciendo nombres de genes...")
     tabla = Table(title="Genes a apagar (Knockouts)")
     tabla.add_column("ID (BiGG)", style="cyan"); tabla.add_column("Nombre Real", style="magenta"); tabla.add_column("Funcion Proteica", style="green")
     for g in mejor["genes"]:
         nombre_local = modelo.genes.get_by_id(g).name
-        if nombre_local and nombre_local != g:
-            nombre_real, funcion = nombre_local, "Nombre extraido del modelo local"
-        else:
-            nombre_real, funcion = traducir_gen_uniprot(g, id_uniprot)
+        nombre_real, funcion = (nombre_local, "Modelo local") if (nombre_local and nombre_local != g) else traducir_gen_uniprot(g, id_uniprot)
         tabla.add_row(g, nombre_real, funcion[:50] + "..." if len(funcion) > 50 else funcion)
     console.print(tabla)
 
@@ -334,6 +365,7 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
     max_mutaciones = IntPrompt.ask("Genes a apagar?", default=3); generaciones = IntPrompt.ask("Generaciones?", default=15); pop_size = IntPrompt.ask("Poblacion?", default=30)
     gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
+    
     reacciones_activas = {r for r, v in modelo.optimize().fluxes.items() if abs(v) > 0.01 and not r.startswith("EX_")}
     genes_candidatos = list({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes})
     if len(genes_candidatos) < 2: return
@@ -372,20 +404,17 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
 def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e")
-    if quimico not in modelo.reactions:
-        if quimico == "EX_caft_e" and Prompt.ask("Inyectar ruta?", choices=["S", "N"], default="S").upper() == "S":
-            modelo, quimico = inyectar_ruta_heterologa(modelo, quimico)
-            if modelo is None: return
-        else: return
+    if quimico not in modelo.reactions: return
 
     gens = IntPrompt.ask("Generaciones", default=10); pop_size = IntPrompt.ask("Poblacion", default=20); mutaciones = IntPrompt.ask("Genes a apagar", default=4)
     gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
-    todos_los_genes = [g.id for g in modelo.genes]
+    
+    todos_los_genes = obtener_genes_no_esenciales(modelo, gen_biomasa)
 
     poblacion = []
     for _ in range(pop_size):
-        gm = random.sample(todos_los_genes, mutaciones)
+        gm = random.sample(todos_los_genes, min(mutaciones, len(todos_los_genes)))
         poblacion.append({"genes": gm, "fitness": evaluar_bacteria(modelo, gm, quimico, gen_biomasa)})
     for gen in track(range(gens), description="Evolucionando..."):
         poblacion.sort(key=lambda x: x["fitness"], reverse=True)
@@ -412,7 +441,7 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
     except: pass
 
 def main():
-    console.clear(); console.print(Panel.fit("[bold green]MetaboEngineer Pro V5.9[/bold green]", style="bold green"))
+    console.clear(); console.print(Panel.fit("[bold green]MetaboEngineer Pro V6.0[/bold green]", style="bold green"))
     setup_logger(); _sincronizar_indice()
 
     console.print("\n[bold]Selecciona el organismo base:[/bold]")
@@ -444,22 +473,19 @@ def main():
             modelo_id = ORGANISMOS[opcion]["id"]
             nombre_organismo = ORGANISMOS[opcion]["nombre"]
 
-    # PREGUNTAR AMBIENTE
     ambiente = Prompt.ask("Condición ambiental", choices=["aerobio", "anaerobio"], default="aerobio")
-    
     seed = preguntar_seed()
 
     with console.status(f"[bold yellow]Cargando modelo...[/bold yellow]"):
         try:
             modelo, msg = cargar_modelo_universal(modelo_id)
-            # APLICAR AMBIENTE
             modelo = configurar_ambiente(modelo, ambiente)
             console.print(f"[green]OK[/green] {msg} | {len(modelo.reactions)} reacciones | Ambiente: {ambiente.upper()}\n")
         except Exception as e:
             console.print(Panel(str(e), title="ERROR", border_style="red")); return
 
     while True:
-        console.print("\n[bold]--- MENU (V5.9) ---[/bold]")
+        console.print("\n[bold]--- MENU (V6.0) ---[/bold]")
         console.print("1. FBA | 2. IA | 3. OptKnock | 4. Integral | 5. Historial | 6. Limpiar Cache | 7. Salir")
         try: op = Prompt.ask("\nSelecciona una opcion", choices=["1", "2", "3", "4", "5", "6", "7"])
         except: break
