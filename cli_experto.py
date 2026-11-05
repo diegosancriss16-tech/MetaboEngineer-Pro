@@ -11,6 +11,7 @@ import random
 import traceback
 from datetime import datetime
 from rich.progress import track
+from cobra.flux_analysis import flux_variability_analysis as fva
 
 # Importamos las funciones core de tu archivo principal
 from metabo_engineer import (
@@ -76,9 +77,11 @@ def metodo_optknock(modelo, quimico, args):
     
     sol_wt = modelo.optimize()
     activas = {r for r, v in sol_wt.fluxes.items() if abs(v) > 0.01 and not r.startswith("EX_")}
-    candidatos = list({g.id for r in activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes})
     
-    if len(candidatos) < 2: raise RuntimeError("Pocos genes activos.")
+    # CORREGIDO: Uso de sorted para reproducibilidad de semilla (Bug 3)
+    genes_candidatos = sorted(list({g.id for r in activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes}))
+    
+    if len(genes_candidatos) < 2: raise RuntimeError("Pocos genes activos.")
     
     def evaluar(genes):
         m = modelo.copy()
@@ -86,11 +89,18 @@ def metodo_optknock(modelo, quimico, args):
             if g in m.genes: m.genes.get_by_id(g).knock_out()
         m.objective = gen_biomasa
         s = m.optimize()
-        return (s.fluxes.get(quimico, 0.0) / s.objective_value) if (s.status == "optimal" and s.objective_value > 0.01) else 0.0
+        # CORREGIDO: Uso de FVA para medir la producción GARANTIZADA, no el vértice falso (Bug 4)
+        if s.status == "optimal" and s.objective_value > 0.01:
+            try:
+                fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
+                return max(0.0, fva_res.minimum.iloc[0])
+            except:
+                return 0.0
+        return 0.0
         
     poblacion = []
     for _ in range(args.poblacion):
-        genes = random.sample(candidatos, min(args.mutaciones, len(candidatos)))
+        genes = random.sample(genes_candidatos, min(args.mutaciones, len(genes_candidatos)))
         poblacion.append({"genes": genes, "fitness": evaluar(genes)})
         
     for gen in track(range(args.generaciones), description="Evolucionando..."):
@@ -100,7 +110,7 @@ def metodo_optknock(modelo, quimico, args):
         while len(nueva) < args.poblacion:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(set(p1[:2] + p2[2:]))
-            if len(hijo) < args.mutaciones: hijo.append(random.choice(candidatos))
+            if len(hijo) < args.mutaciones: hijo.append(random.choice(genes_candidatos))
             nueva.append({"genes": hijo, "fitness": evaluar(hijo)})
         poblacion = nueva
     return sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
@@ -121,7 +131,6 @@ def main():
     except Exception as e:
         print(f"[ERROR] {e}", file=sys.stderr); return 2
 
-    # APLICAR AMBIENTE
     print(f"[INFO] Configurando ambiente: {args.ambiente.upper()}...")
     modelo = configurar_ambiente(modelo, args.ambiente)
 
@@ -141,7 +150,6 @@ def main():
         elif args.metodo == "optknock":
             mejor = metodo_optknock(modelo, args.quimico, args)
         elif args.metodo == "integral":
-            # Para el CLI, integral hace lo mismo que IA pero luego genera el reporte completo
             mejor = metodo_ia(modelo, args.quimico, args)
     except Exception as e:
         print(f"[ERROR] {e}", file=sys.stderr); logging.error(traceback.format_exc()); return 4
@@ -150,14 +158,12 @@ def main():
     print(f"     Fitness: {mejor['fitness']:.4f} mmol/gDW/h")
     print(f"     Genes ({len(mejor['genes'])}): {', '.join(mejor['genes'])}")
 
-    # Traduccion de genes
     id_uniprot = get_organism_id(args.modelo)
     print(f"\n[INFO] Traduciendo genes (taxon={id_uniprot})...")
     for g in mejor["genes"]:
         nombre, funcion = traducir_gen_uniprot(g, id_uniprot)
         print(f"       {g:>15} | {nombre:<15} | {funcion[:50]}")
 
-    # Analisis profundo y reporte
     gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
     try:
         print(f"\n[INFO] Analisis profundo + termodinamica...")
