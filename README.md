@@ -1,13 +1,12 @@
 > **Required Notice:** Copyright Diego San Cristobal (https://github.com/diegosancriss16-tech/MetaboEngineer-Pro)
 
-# 🧬 MetaboEngineer Pro (v0.1.0-beta)
-
+🧬 MetaboEngineer Pro (v0.2.0) 
 > Suite integral de ingeniería metabólica y biología sintética para el diseño racional de cepas microbianas. 100% open-source y auditable.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
 [![Status](https://img.shields.io/badge/Status-Beta-orange.svg)]()
-[![Version](https://img.shields.io/badge/Version-v0.1.0--beta-brightgreen.svg)]()
+ [![Version](https://img.shields.io/badge/Version-v0.2.0-brightgreen.svg)]()
 [![COBRApy](https://img.shields.io/badge/COBRApy-%E2%89%A50.29-blue.svg)](https://opencobra.github.io/cobrapy/)
 [![eQuilibrator](https://img.shields.io/badge/eQuilibrator-%E2%89%A50.4-purple.svg)](https://equilibrator.weizmann.ac.il/)
 [![Tests](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml/badge.svg)](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml)
