@@ -16,23 +16,27 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-
+    
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-
+        
+    - name: Instalar librerías del sistema (GLPK y SWIG)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libglpk-dev glpk-utils swig
+        
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest pytest-cov
-
-    - name: Descargar iML1515 para tests (FIX 301)
+        
+    - name: Descargar modelo para tests (FIX 301)
       run: |
-        # Solo iML1515. textbook/e_coli_core viene bundleado en COBRApy.
-        curl -fL -o iML1515.xml "https://bigg.ucsd.edu/static/models/iML1515.xml"
-
+        curl -L -o iML1515.xml "https://bigg.ucsd.edu/static/models/iML1515.xml"
+        
     - name: Run tests
       run: |
-        pytest --ignore=tests/test_validation_papers.py --ignore=tests/test_validation_phd.py
+        pytest
