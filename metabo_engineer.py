@@ -72,11 +72,12 @@ def preguntar_seed():
         return random.randint(0, 999999)
 
 
+# 🛠️ FIX 3: Bloqueo estricto de ambientes (0.0, 0.0) para evitar secreción
 def configurar_ambiente(modelo, ambiente):
     modelo_amb = modelo.copy()
     if 'EX_o2_e' in modelo_amb.reactions:
         if ambiente == 'anaerobio':
-            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 1000.0)
+            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 0.0) # Bloqueo total de O2
         else:
             modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0)
     else:
@@ -86,7 +87,8 @@ def configurar_ambiente(modelo, ambiente):
     if ambiente == 'aerobio':
         for rxn in ["EX_etoh_e", "EX_lac__D_e", "EX_for_e"]:
             if rxn in modelo_amb.reactions:
-                modelo_amb.reactions.get_by_id(rxn).bounds = (0.0, 1000.0)
+                # Bloquear totalmente la producción y captación de fermentativos
+                modelo_amb.reactions.get_by_id(rxn).bounds = (0.0, 0.0) 
 
     return modelo_amb
 
@@ -304,8 +306,6 @@ def aplicar_restricciones_cineticas(modelo):
 
 # ============================================================
 # ✅ OPCIÓN A-REFINADA (RobustKnock): FVA-min al 100%
-#    Fitness = producción MÍNIMA garantizada en el óptimo de crecimiento.
-#    Esto captura acoplamientos "knife-edge" como atpB (1.5562 a 100%).
 # ============================================================
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
     modelo = modelo_base.copy()
@@ -374,6 +374,7 @@ def mostrar_cinetica_local(modelo, quimico, genes_knockout):
     if encontrados > 0: console.print(tabla)
 
 
+# 🛠️ FIX 2: Unidades biológicas (mol/mol)
 def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
@@ -394,10 +395,15 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
 
             if sol_final.status == 'optimal':
                 produccion = sol_final.objective_value
-                console.print(f"   -> Produccion Bruta (FBA): [bold cyan]{produccion:.4f}[/bold cyan] mmol/gDW/h")
-                console.print(f"   -> Rendimiento Ajustado: [bold green]{max(0.0, produccion):.4f}[/bold green] mmol/gDW/h")
+                
+                # Calcula el rendimiento asumiendo 10 mmol/gDW/h de glucosa
+                rendimiento_mol_mol = produccion / 10.0
+                
+                console.print(f"   -> Fitness (Flujo):      [bold cyan]{produccion:.4f}[/bold cyan] mmol/gDW/h")
+                console.print(f"   -> Rendimiento Teórico: [bold green]{rendimiento_mol_mol:.3f}[/bold green] mol/mol")
+                
                 carga = sol_final.fluxes.abs().sum()
-                console.print(f"   -> Carga Metabolica Total: [bold magenta]{carga:.2f}[/bold magenta]")
+                console.print(f"   -> Carga Metabolica:    [bold magenta]{carga:.2f}[/bold magenta]")
                 analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
                 mostrar_cinetica_local(modelo, quimico, genes_a_mutar)
     except Exception as e:
@@ -421,6 +427,7 @@ def mostrar_historial():
     console.print(df.tail(10).to_string())
 
 
+# 🛠️ FIX 4: Mutación real en el GA
 def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
@@ -444,6 +451,12 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(set(p1[:3] + p2[3:]))
             if len(hijo) < mutaciones: hijo.append(random.choice(todos_los_genes))
+            
+            # NUEVO: Mutación aleatoria (10% de probabilidad de cambiar un gen)
+            if random.random() < 0.1 and hijo:
+                idx = random.randint(0, len(hijo) - 1)
+                hijo[idx] = random.choice(todos_los_genes)
+                
             nueva.append({"genes": hijo, "fitness": evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)})
         poblacion = nueva
 
@@ -510,6 +523,12 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(set(p1[:2] + p2[2:]))
             if len(hijo) < max_mutaciones: hijo.append(random.choice(genes_candidatos))
+            
+            # NUEVO: Mutación
+            if random.random() < 0.1 and hijo:
+                idx = random.randint(0, len(hijo) - 1)
+                hijo[idx] = random.choice(genes_candidatos)
+                
             nueva.append({"genes": hijo, "fitness": evaluar(hijo)})
         poblacion = nueva
 
@@ -601,6 +620,11 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(set(p1[:3] + p2[3:]))
             if len(hijo) < mutaciones: hijo.append(random.choice(todos_los_genes))
+            
+            if random.random() < 0.1 and hijo:
+                idx = random.randint(0, len(hijo) - 1)
+                hijo[idx] = random.choice(todos_los_genes)
+
             nueva.append({"genes": hijo, "fitness": evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)})
         poblacion = nueva
 
@@ -666,7 +690,10 @@ def main():
         try:
             modelo, msg = cargar_modelo_universal(modelo_id)
             modelo = configurar_ambiente(modelo, ambiente)
-            modelo = aplicar_restricciones_cineticas(modelo)
+            
+            # 🛠️ FIX 1: Desactivado por inconsistencia de unidades
+            # modelo = aplicar_restricciones_cineticas(modelo) 
+            
             console.print(f"[green]OK[/green] {msg} | {len(modelo.reactions)} reacciones | Ambiente: {ambiente.upper()}\n")
         except Exception as e:
             console.print(Panel(str(e), title="ERROR", border_style="red")); return
