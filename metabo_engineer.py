@@ -68,18 +68,23 @@ def preguntar_seed():
     except:
         return random.randint(0, 999999)
 
+# 🛠️ FIX 2: Validación estricta del ambiente (Evita silencios por typos)
 def configurar_ambiente(modelo, ambiente):
+    ambiente_limpio = str(ambiente).lower().strip()
+    if ambiente_limpio not in ['aerobio', 'anaerobio']:
+        raise ValueError(f"Ambiente '{ambiente}' no válido. Debe ser 'aerobio' o 'anaerobio'.")
+
     modelo_amb = modelo.copy()
     if 'EX_o2_e' in modelo_amb.reactions:
-        if ambiente == 'anaerobio':
+        if ambiente_limpio == 'anaerobio':
             modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 0.0) # Bloqueo total O2
         else:
             modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0)
     else:
-        if ambiente == 'anaerobio':
+        if ambiente_limpio == 'anaerobio':
             console.print("[yellow]WARN[/yellow] El modelo no tiene EX_o2_e.")
 
-    if ambiente == 'aerobio':
+    if ambiente_limpio == 'aerobio':
         for rxn in ["EX_etoh_e", "EX_lac__D_e", "EX_for_e"]:
             if rxn in modelo_amb.reactions:
                 # Bloqueo estricto de secreción/captación
@@ -166,6 +171,7 @@ def _sincronizar_indice():
                 _registrar_modelo(read_sbml_model(os.path.join("modelos", archivo)), archivo[:-4], os.path.join("modelos", archivo), "manual")
             except: pass
 
+# 🛠️ FIX 3: Degradación graciosa si falla la red o el modelo no existe
 def cargar_modelo_universal(modelo_id):
     if not modelo_id or not str(modelo_id).strip(): raise Exception("ID de modelo vacio.")
     modelo_id = str(modelo_id).strip()
@@ -175,7 +181,7 @@ def cargar_modelo_universal(modelo_id):
             modelo = load_model(modelo_id)
             return modelo, f"Modelo '{modelo_id}' cargado desde bundle COBRApy."
         except Exception as e:
-            raise Exception(f"No se pudo cargar '{modelo_id}' desde bundle COBRApy: {e}")
+            raise ValueError(f"No se pudo cargar '{modelo_id}' desde bundle COBRApy: {e}")
 
     ruta_cwd = f"{modelo_id}.xml"
     if os.path.exists(ruta_cwd):
@@ -197,7 +203,7 @@ def cargar_modelo_universal(modelo_id):
         except: pass
         return modelo, f"Modelo '{modelo_id}' descargado via cobrapy."
     except Exception as e:
-        raise Exception(f"No se pudo cargar '{modelo_id}': {e}")
+        raise ValueError(f"No se pudo cargar el modelo '{modelo_id}' desde BiGG. Verifica tu conexión o descarga el XML manualmente. Error original: {e}")
 
 def inyectar_ruta_heterologa(modelo, quimico):
     if quimico == "EX_caft_e":
@@ -256,27 +262,40 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     console.print(f"[green]OK[/green] Se descartaron {len(modelo.genes) - len(genes_no_esenciales)} genes letales.")
     return genes_no_esenciales
 
+# 🛠️ FIX 1: Validación estricta de argumentos (Elimina los silencios S1)
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
+    # --- VALIDACIÓN PREVIA (S3: Rechazo limpio) ---
+    if not genes_apagados:
+        raise ValueError("La lista de genes a apagar está vacía. El GA necesita al menos un gen.")
+    
+    if gen_objetivo not in modelo_base.reactions:
+        raise ValueError(f"El químico objetivo '{gen_objetivo}' no existe en el modelo.")
+        
+    if gen_biomasa not in modelo_base.reactions:
+        raise ValueError(f"La reacción de biomasa '{gen_biomasa}' no existe en el modelo.")
+        
+    for gen_id in genes_apagados:
+        if gen_id not in modelo_base.genes:
+            raise ValueError(f"El gen '{gen_id}' no existe en el modelo.")
+
+    # --- CÁLCULO (Solo si todo es válido) ---
     modelo = modelo_base.copy()
     for gen_id in genes_apagados:
-        if gen_id in modelo.genes:
-            modelo.genes.get_by_id(gen_id).knock_out()
-
+        modelo.genes.get_by_id(gen_id).knock_out()
+            
     try:
         modelo.objective = gen_biomasa
         sol_biomasa = modelo.optimize()
-
+        
         if sol_biomasa.status != 'optimal' or sol_biomasa.objective_value < 0.05:
-            return -1e6
-
+            return -1e6  # Knockout letal (esto sí es un resultado biológico, no un error)
+            
         max_biomasa_mut = sol_biomasa.objective_value
-        bio_rxn = modelo.reactions.get_by_id(gen_biomasa)
-        bio_rxn.lower_bound = max_biomasa_mut * 1.0
-
+        modelo.reactions.get_by_id(gen_biomasa).lower_bound = max_biomasa_mut * 1.0
         modelo.objective = gen_objetivo
         modelo.objective.direction = 'min'
         sol_prod = modelo.optimize()
-
+        
         if sol_prod.status == 'optimal':
             return max(0.0, sol_prod.objective_value)
     except Exception:
@@ -313,7 +332,6 @@ def mostrar_cinetica_local(modelo, quimico, genes_knockout):
             encontrados += 1
     if encontrados > 0: console.print(tabla)
 
-# 🛠️ FIX: Unidades biológicas dinámicas (mol/mol) + Garantizado (min 100%) vs Optimista (max 90%)
 def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
@@ -352,7 +370,6 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
                 
             rendimiento_mol_mol = prod_garantizada / glc_uptake
 
-            # Textos exactos para que el regex del test haga match
             console.print(f"   -> Fitness (Garantizado @100%): [bold cyan]{prod_garantizada:.4f}[/bold cyan] mmol/gDW/h")
             console.print(f"   -> Rendimiento (Garantizado): [bold green]{rendimiento_mol_mol:.3f}[/bold green] mol/mol")
             console.print(f"   [dim](Calculado sobre una captación de glucosa de {glc_uptake} mmol/gDW/h)[/dim]")
@@ -382,7 +399,6 @@ def mostrar_historial():
     if df.empty: return
     console.print(df.tail(10).to_string())
 
-# 🛠️ FIX 1, 2, 3: Relleno seguro con min(), retorno de 'mejor' y protección en tabla
 def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
@@ -406,14 +422,12 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(dict.fromkeys(p1[:3] + p2[3:]))
             
-            # FIX 3: Relleno seguro limitado por genes disponibles
             objetivo = min(mutaciones, len(todos_los_genes))
             while len(hijo) < objetivo:
                 nuevo = random.choice(todos_los_genes)
                 if nuevo not in hijo:
                     hijo.append(nuevo)
             
-            # Mutación evitando duplicados
             if random.random() < 0.1 and hijo:
                 idx = random.randint(0, len(hijo) - 1)
                 nuevo_gen = random.choice(todos_los_genes)
@@ -431,7 +445,6 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     tabla = Table(title="Genes a apagar (Knockouts)")
     tabla.add_column("ID (BiGG)", style="cyan"); tabla.add_column("Nombre Real", style="magenta"); tabla.add_column("Funcion Proteica", style="green")
     for g in mejor["genes"]:
-        # FIX 1: Seguridad para que no explote si el gen no existe
         if g in modelo.genes:
             nombre_local = modelo.genes.get_by_id(g).name
             nombre_real, funcion = (nombre_local, "Modelo local") if (nombre_local and nombre_local != g) else traducir_gen_uniprot(g, id_uniprot)
@@ -447,7 +460,6 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     except: pass
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
     
-    # FIX 2: Retornar mejor
     return mejor
 
 def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
@@ -488,14 +500,12 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(dict.fromkeys(p1[:2] + p2[2:]))
             
-            # FIX 3: Relleno seguro
             objetivo = min(max_mutaciones, len(genes_candidatos))
             while len(hijo) < objetivo:
                 nuevo = random.choice(genes_candidatos)
                 if nuevo not in hijo:
                     hijo.append(nuevo)
             
-            # Mutación evitando duplicados
             if random.random() < 0.1 and hijo:
                 idx = random.randint(0, len(hijo) - 1)
                 nuevo_gen = random.choice(genes_candidatos)
@@ -588,14 +598,12 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(dict.fromkeys(p1[:3] + p2[3:]))
             
-            # FIX 3: Relleno seguro
             objetivo = min(mutaciones, len(todos_los_genes))
             while len(hijo) < objetivo:
                 nuevo = random.choice(todos_los_genes)
                 if nuevo not in hijo:
                     hijo.append(nuevo)
             
-            # Mutación evitando duplicados
             if random.random() < 0.1 and hijo:
                 idx = random.randint(0, len(hijo) - 1)
                 nuevo_gen = random.choice(todos_los_genes)
