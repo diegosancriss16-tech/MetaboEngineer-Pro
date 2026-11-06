@@ -230,29 +230,15 @@ python cli_experto.py
 
 ## 📚 Citación y Predecesores
 
-Si usas MetaboEngineer Pro en una publicación, cita:
+## Citación
 
-bibtex
-@software{metaboengineer2025,
-author = {San Miguel, Diego},
-title = {MetaboEngineer Pro: A Suite for Metabolic Engineering and Synthetic Biology},
-year = {2025},
-version = {v0.1.0-beta},
-url = {https://github.com/diegosancriss16-tech/MetaboEngineer-Pro}
-}
+Si usas este software, cita los algoritmos base en los que se fundamenta:
 
-
-**Este trabajo se inspira y cita a:**
-
-- **OptGene:** Patil KR, Rocha I, Förster J, Nielsen J. *Evolutionary programming as a platform for in silico metabolic engineering*. **BMC Biotechnology** (2005).
-- **Keio Collection:** Baba T. et al. *Construction of Escherichia coli K-12 in-frame, single-gene knockout mutants: the Keio collection*. **Molecular Systems Biology** 2:2006.0008 (2006).
-- **iML1515:** Monk JM. et al. *iML1515, a knowledgebase that computes Escherichia coli traits*. **Nature Biotechnology** 35(10):904–908 (2017).
-- **Jantama et al.:** Jantama K. et al. *Combining metabolic engineering and metabolic evolution to develop nonrecombinant strains of Escherichia coli C that produce succinate*. **Biotechnology and Bioengineering** 99(5):1140–1153 (2008).
-- **COBRApy:** Ebrahim A. et al. *COBRApy: COnstraints-Based Reconstruction and Analysis for Python*. **BMC Systems Biology** 7:64 (2013).
-- **eQuilibrator:** Flamholz A. et al. *eQuilibrator—the biochemical thermodynamics calculator*. **Nucleic Acids Research** 40:D770–D775 (2012).
-- **BiGG Models:** King ZA. et al. *BiGG Models: A platform for integrating, standardizing and sharing genome-scale models*. **Nucleic Acids Research** 44:D515–D522 (2016).
-- **UniProt:** UniProt Consortium. *UniProt: the Universal Protein Knowledgebase in 2023*. **Nucleic Acids Research** 51:D523–D531 (2023).
-- **Rhea:** Bansal P. et al. *Rhea, the reaction knowledgebase in 2022*. **Nucleic Acids Research** 50:D693–D700 (2022).
+- **MetaboEngineer Pro** (2025).
+- **OptGene**: Patil, K. R., Rocha, I., Förster, J., & Nielsen, J. (2005). Evolutionary programming as a platform for in silico metabolic engineering. *BMC Bioinformatics*, 6(1), 308.
+- **OptKnock**: Burgard, A. P., Pharkya, P., & Maranas, C. D. (2003). Optknock: a bilevel programming framework for identifying gene knockout strategies for microbial strain optimization. *Biotechnology and Bioengineering*, 84(6), 647-657.
+- **COBRApy**: Ebrahim, A., Lerman, J. A., Palsson, B. O., & Hyduke, D. R. (2013). COBRApy: COnstraints-Based Reconstruction and Analysis for Python. *BMC Systems Biology*, 7(1), 74.
+- **Keio Collection**: Baba, T., et al. (2006). Construction of Escherichia coli K-12 in-frame, single-gene knockout mutants: the Keio collection. *Molecular Systems Biology*, 2(1), 2006-0008.
 
 ---
 
