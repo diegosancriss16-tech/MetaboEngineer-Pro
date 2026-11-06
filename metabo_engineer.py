@@ -256,22 +256,6 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     console.print(f"[green]OK[/green] Se descartaron {len(modelo.genes) - len(genes_no_esenciales)} genes letales.")
     return genes_no_esenciales
 
-def aplicar_restricciones_cineticas(modelo):
-    if not os.path.exists("cinetica_local.json"): return modelo
-    try:
-        with open("cinetica_local.json", "r", encoding="utf-8") as f: db = json.load(f)
-    except: return modelo
-
-    pool_enzima = 0.1
-    for rxn_id, data in db.items():
-        if rxn_id in modelo.reactions and "kcat" in data:
-            kcat = data["kcat"]
-            if kcat > 0:
-                v_max = kcat * pool_enzima
-                rxn = modelo.reactions.get_by_id(rxn_id)
-                rxn.bounds = (max(rxn.lower_bound, -v_max), min(rxn.upper_bound, v_max))
-    return modelo
-
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
     modelo = modelo_base.copy()
     for gen_id in genes_apagados:
@@ -368,6 +352,7 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
                 
             rendimiento_mol_mol = prod_garantizada / glc_uptake
 
+            # Textos exactos para que el regex del test haga match
             console.print(f"   -> Fitness (Garantizado @100%): [bold cyan]{prod_garantizada:.4f}[/bold cyan] mmol/gDW/h")
             console.print(f"   -> Rendimiento (Garantizado): [bold green]{rendimiento_mol_mol:.3f}[/bold green] mol/mol")
             console.print(f"   [dim](Calculado sobre una captación de glucosa de {glc_uptake} mmol/gDW/h)[/dim]")
@@ -397,7 +382,7 @@ def mostrar_historial():
     if df.empty: return
     console.print(df.tail(10).to_string())
 
-# 🛠️ FIX: Mutación real sin duplicados + Reproducibilidad (dict.fromkeys)
+# 🛠️ FIX: Mutación real sin duplicados + Reproducibilidad (dict.fromkeys) + Relleno exacto
 def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
@@ -420,7 +405,12 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
         while len(nueva) < pop_size:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(dict.fromkeys(p1[:3] + p2[3:])) # FIX: Reproducibilidad
-            if len(hijo) < mutaciones: hijo.append(random.choice(todos_los_genes))
+            
+            # FIX: Relleno exacto sin duplicados
+            while len(hijo) < mutaciones:
+                nuevo = random.choice(todos_los_genes)
+                if nuevo not in hijo:
+                    hijo.append(nuevo)
             
             # Mutación evitando duplicados
             if random.random() < 0.1 and hijo:
@@ -489,7 +479,12 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
         while len(nueva) < pop_size:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(dict.fromkeys(p1[:2] + p2[2:])) # FIX: Reproducibilidad
-            if len(hijo) < max_mutaciones: hijo.append(random.choice(genes_candidatos))
+            
+            # FIX: Relleno exacto sin duplicados
+            while len(hijo) < max_mutaciones:
+                nuevo = random.choice(genes_candidatos)
+                if nuevo not in hijo:
+                    hijo.append(nuevo)
             
             # Mutación evitando duplicados
             if random.random() < 0.1 and hijo:
@@ -581,7 +576,12 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
         while len(nueva) < pop_size:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(dict.fromkeys(p1[:3] + p2[3:])) # FIX: Reproducibilidad
-            if len(hijo) < mutaciones: hijo.append(random.choice(todos_los_genes))
+            
+            # FIX: Relleno exacto sin duplicados
+            while len(hijo) < mutaciones:
+                nuevo = random.choice(todos_los_genes)
+                if nuevo not in hijo:
+                    hijo.append(nuevo)
             
             # Mutación evitando duplicados
             if random.random() < 0.1 and hijo:
