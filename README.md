@@ -66,7 +66,7 @@ Para validar el motor de esencialidad, comparamos `single_gene_deletion` contra 
 
 **Interpretación:** El modelo muestra el trade-off clásico precision/recall. En LB (condiciones reales de Keio) la precisión sube al 82.89% (no hay falsos positivos de biosíntesis). En M9 el recall sube al 72.73%, consistente con la literatura para modelos FBA no curados (Monk et al. 2017 reporta ~85% tras curación manual).
 
-*(Nota forense: Durante el desarrollo, una aparente discrepancia contra COBRApy resultó ser un bug en el test de validación. Tras corregirlo, ambos métodos coinciden en el 100% de los genes. Documentado en `tests/`.)*
+*(Nota: Durante el desarrollo, una aparente discrepancia contra COBRApy resultó ser un bug en el test de validación. Tras corregirlo, ambos métodos coinciden en el 100% de los genes. Documentado en `tests/`.)*
 
 ---
 
@@ -96,7 +96,7 @@ Hit-rate: **2/2 (100%)** con presupuesto real (pop=50, gens=20).
 - **`nrdD` (ribonucleótido reductasa anaerobia)**: contribuidor epistático real. Sin él, fitness = 1.5562 (= atpF solo). Aporta +0.0050 al diseño.
 - `gatB`, `crr`, `mglA`: pasajeros silenciosos (sin efecto individual ni combinado).
 
-**Conclusiones honestas:**
+**Conclusiones:**
 - El GA puede superar el óptimo de k=1 mediante epistasis intergénera (ATP sintasa + metabolismo de nucleótidos), aunque el margen es pequeño (+0.32%).
 - El GA converge consistentemente a la ATP sintasa como mecanismo de acoplamiento, redescubriendo el diseño canónico de la literatura computacional.
 - La estocasticidad es real: en k=3 (presupuesto pequeño) el hit-rate baja al 33%.
@@ -234,7 +234,7 @@ Si usas MetaboEngineer Pro en una publicación, cita:
 
 bibtex
 @software{metaboengineer2025,
-author = {San Cristobal, Diego},
+author = {San Miguel, Diego},
 title = {MetaboEngineer Pro: A Suite for Metabolic Engineering and Synthetic Biology},
 year = {2025},
 version = {v0.1.0-beta},
