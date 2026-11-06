@@ -13,7 +13,6 @@ from datetime import datetime
 from rich.progress import track
 from cobra.flux_analysis import flux_variability_analysis as fva
 
-# Importamos las funciones core de tu archivo principal
 from metabo_engineer import (
     cargar_modelo_universal,
     evaluar_bacteria,
@@ -51,7 +50,6 @@ def metodo_ia(modelo, quimico, args):
     gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
     
-    # FILTRO UNIVERSAL DE ESENCIALIDAD
     todos_los_genes = obtener_genes_no_esenciales(modelo, gen_biomasa)
     
     poblacion = []
@@ -67,6 +65,15 @@ def metodo_ia(modelo, quimico, args):
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(set(p1[:3] + p2[3:]))
             if len(hijo) < args.mutaciones: hijo.append(random.choice(todos_los_genes))
+            
+            # Mutación evitando duplicados
+            if random.random() < 0.1 and hijo:
+                idx = random.randint(0, len(hijo) - 1)
+                nuevo_gen = random.choice(todos_los_genes)
+                if nuevo_gen not in hijo:
+                    hijo[idx] = nuevo_gen
+                    hijo = list(set(hijo))
+                    
             nueva.append({"genes": hijo, "fitness": evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)})
         poblacion = nueva
     return sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
@@ -77,8 +84,6 @@ def metodo_optknock(modelo, quimico, args):
     
     sol_wt = modelo.optimize()
     activas = {r for r, v in sol_wt.fluxes.items() if abs(v) > 0.01 and not r.startswith("EX_")}
-    
-    # CORREGIDO: Uso de sorted para reproducibilidad de semilla (Bug 3)
     genes_candidatos = sorted(list({g.id for r in activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes}))
     
     if len(genes_candidatos) < 2: raise RuntimeError("Pocos genes activos.")
@@ -89,13 +94,11 @@ def metodo_optknock(modelo, quimico, args):
             if g in m.genes: m.genes.get_by_id(g).knock_out()
         m.objective = gen_biomasa
         s = m.optimize()
-        # CORREGIDO: Uso de FVA para medir la producción GARANTIZADA, no el vértice falso (Bug 4)
         if s.status == "optimal" and s.objective_value > 0.01:
             try:
                 fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
                 return max(0.0, fva_res.minimum.iloc[0])
-            except:
-                return 0.0
+            except: return 0.0
         return 0.0
         
     poblacion = []
@@ -111,6 +114,15 @@ def metodo_optknock(modelo, quimico, args):
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
             hijo = list(set(p1[:2] + p2[2:]))
             if len(hijo) < args.mutaciones: hijo.append(random.choice(genes_candidatos))
+            
+            # Mutación evitando duplicados
+            if random.random() < 0.1 and hijo:
+                idx = random.randint(0, len(hijo) - 1)
+                nuevo_gen = random.choice(genes_candidatos)
+                if nuevo_gen not in hijo:
+                    hijo[idx] = nuevo_gen
+                    hijo = list(set(hijo))
+                    
             nueva.append({"genes": hijo, "fitness": evaluar(hijo)})
         poblacion = nueva
     return sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]

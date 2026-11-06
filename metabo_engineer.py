@@ -53,16 +53,13 @@ _RUTA_HISTORIAL_CSV = "reportes/historial.csv"
 _RUTA_CACHE_UNIPROT = "cache_uniprot.json"
 _RUTA_INDICE = "modelos/_index.json"
 
-# Modelos bundleados en COBRApy (no requieren red ni archivo externo)
 _MODELOS_BUNDLED = {"textbook", "e_coli_core"}
-
 
 def setup_logger():
     if not os.path.exists("logs"): os.makedirs("logs")
     log_file = f"logs/run_{datetime.now():%Y%m%d_%H%M%S}.log"
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", handlers=[logging.FileHandler(log_file, encoding="utf-8")])
     return log_file
-
 
 def preguntar_seed():
     try:
@@ -71,13 +68,11 @@ def preguntar_seed():
     except:
         return random.randint(0, 999999)
 
-
-# 🛠️ FIX 3: Bloqueo estricto de ambientes (0.0, 0.0) para evitar secreción
 def configurar_ambiente(modelo, ambiente):
     modelo_amb = modelo.copy()
     if 'EX_o2_e' in modelo_amb.reactions:
         if ambiente == 'anaerobio':
-            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 0.0) # Bloqueo total de O2
+            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 0.0) # Bloqueo total O2
         else:
             modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0)
     else:
@@ -87,11 +82,10 @@ def configurar_ambiente(modelo, ambiente):
     if ambiente == 'aerobio':
         for rxn in ["EX_etoh_e", "EX_lac__D_e", "EX_for_e"]:
             if rxn in modelo_amb.reactions:
-                # Bloquear totalmente la producción y captación de fermentativos
+                # Bloqueo estricto de secreción/captación
                 modelo_amb.reactions.get_by_id(rxn).bounds = (0.0, 0.0) 
 
     return modelo_amb
-
 
 def get_organism_id(modelo_id: str) -> str:
     if not modelo_id: return "83333"
@@ -101,25 +95,20 @@ def get_organism_id(modelo_id: str) -> str:
     if "iEK1008" in modelo_id: return "1773"
     return "83333"
 
-
 def _cargar_cache_uniprot():
     if not os.path.exists(_RUTA_CACHE_UNIPROT): return {}
     try:
         with open(_RUTA_CACHE_UNIPROT, "r", encoding="utf-8") as f: return json.load(f)
-    except:
-        return {}
-
+    except: return {}
 
 def _guardar_cache_uniprot(cache):
     with open(_RUTA_CACHE_UNIPROT + ".tmp", "w", encoding="utf-8") as f: json.dump(cache, f, indent=2)
     os.replace(_RUTA_CACHE_UNIPROT + ".tmp", _RUTA_CACHE_UNIPROT)
 
-
 def limpiar_cache_uniprot():
     if os.path.exists(_RUTA_CACHE_UNIPROT):
         os.remove(_RUTA_CACHE_UNIPROT)
         console.print(f"[green]OK[/green] Cache eliminado.")
-
 
 def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
     if not re.search(r'\d', gen_id): return gen_id, "Nombre comun"
@@ -141,10 +130,8 @@ def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
                     cache[clave] = [nombre_gen, nombre_proteina]
                     _guardar_cache_uniprot(cache)
                 return nombre_gen, nombre_proteina
-    except:
-        pass
+    except: pass
     return gen_id, "No encontrado en UniProt"
-
 
 def _sha256_archivo(ruta):
     h = hashlib.sha256()
@@ -152,29 +139,23 @@ def _sha256_archivo(ruta):
         for chunk in iter(lambda: f.read(8192), b""): h.update(chunk)
     return h.hexdigest()
 
-
 def _cargar_indice():
     if not os.path.exists(_RUTA_INDICE): return {"version": 1, "modelos": {}}
     try:
         with open(_RUTA_INDICE, "r", encoding="utf-8") as f: return json.load(f)
-    except:
-        return {"version": 1, "modelos": {}}
-
+    except: return {"version": 1, "modelos": {}}
 
 def _guardar_indice(indice):
     with open(_RUTA_INDICE + ".tmp", "w", encoding="utf-8") as f: json.dump(indice, f, indent=2)
     os.replace(_RUTA_INDICE + ".tmp", _RUTA_INDICE)
-
 
 def _registrar_modelo(modelo, modelo_id, ruta, fuente):
     indice = _cargar_indice()
     indice["modelos"][modelo_id] = {"archivo": os.path.basename(ruta), "sha256": _sha256_archivo(ruta), "fecha": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"), "reacciones": len(modelo.reactions), "genes": len(modelo.genes)}
     _guardar_indice(indice)
 
-
 def listar_modelos_cacheados():
     return _cargar_indice().get("modelos", {})
-
 
 def _sincronizar_indice():
     if not os.path.exists("modelos"): return
@@ -183,16 +164,12 @@ def _sincronizar_indice():
         if archivo.endswith(".xml") and archivo[:-4] not in indice["modelos"]:
             try:
                 _registrar_modelo(read_sbml_model(os.path.join("modelos", archivo)), archivo[:-4], os.path.join("modelos", archivo), "manual")
-            except:
-                pass
-
+            except: pass
 
 def cargar_modelo_universal(modelo_id):
-    if not modelo_id or not str(modelo_id).strip():
-        raise Exception("ID de modelo vacio.")
+    if not modelo_id or not str(modelo_id).strip(): raise Exception("ID de modelo vacio.")
     modelo_id = str(modelo_id).strip()
 
-    # 1) Modelos bundleados en COBRApy: no requieren red ni archivo externo.
     if modelo_id in _MODELOS_BUNDLED:
         try:
             modelo = load_model(modelo_id)
@@ -200,13 +177,11 @@ def cargar_modelo_universal(modelo_id):
         except Exception as e:
             raise Exception(f"No se pudo cargar '{modelo_id}' desde bundle COBRApy: {e}")
 
-    # 2) FIX CI: leer desde CWD (el workflow hace curl de iML1515.xml a ./)
     ruta_cwd = f"{modelo_id}.xml"
     if os.path.exists(ruta_cwd):
         modelo = read_sbml_model(ruta_cwd)
         return modelo, f"Modelo '{modelo_id}' cargado desde {ruta_cwd} (CI)."
 
-    # 3) Cache local en modelos/
     if not os.path.exists("modelos"): os.makedirs("modelos")
     ruta_local = f"modelos/{modelo_id}.xml"
     if os.path.exists(ruta_local):
@@ -214,18 +189,15 @@ def cargar_modelo_universal(modelo_id):
         _registrar_modelo(modelo, modelo_id, ruta_local, "local")
         return modelo, f"Modelo '{modelo_id}' cargado desde disco local."
 
-    # 4) Descarga via cobrapy (último recurso, requiere red)
     try:
         modelo = load_model(modelo_id)
         try:
             write_sbml_model(modelo, ruta_local)
             _registrar_modelo(modelo, modelo_id, ruta_local, "cobrapy")
-        except:
-            pass
+        except: pass
         return modelo, f"Modelo '{modelo_id}' descargado via cobrapy."
     except Exception as e:
         raise Exception(f"No se pudo cargar '{modelo_id}': {e}")
-
 
 def inyectar_ruta_heterologa(modelo, quimico):
     if quimico == "EX_caft_e":
@@ -259,7 +231,6 @@ def inyectar_ruta_heterologa(modelo, quimico):
         return modelo, "EX_caft_e"
     return None, None
 
-
 def obtener_genes_no_esenciales(modelo, gen_biomasa):
     console.print("[cyan]INFO[/cyan] Filtrando genes esenciales...")
     genes_no_esenciales = []
@@ -285,13 +256,11 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     console.print(f"[green]OK[/green] Se descartaron {len(modelo.genes) - len(genes_no_esenciales)} genes letales.")
     return genes_no_esenciales
 
-
 def aplicar_restricciones_cineticas(modelo):
     if not os.path.exists("cinetica_local.json"): return modelo
     try:
         with open("cinetica_local.json", "r", encoding="utf-8") as f: db = json.load(f)
-    except:
-        return modelo
+    except: return modelo
 
     pool_enzima = 0.1
     for rxn_id, data in db.items():
@@ -303,13 +272,8 @@ def aplicar_restricciones_cineticas(modelo):
                 rxn.bounds = (max(rxn.lower_bound, -v_max), min(rxn.upper_bound, v_max))
     return modelo
 
-
-# ============================================================
-# ✅ OPCIÓN A-REFINADA (RobustKnock): FVA-min al 100%
-# ============================================================
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
     modelo = modelo_base.copy()
-
     for gen_id in genes_apagados:
         if gen_id in modelo.genes:
             modelo.genes.get_by_id(gen_id).knock_out()
@@ -322,13 +286,11 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
             return -1e6
 
         max_biomasa_mut = sol_biomasa.objective_value
-
         bio_rxn = modelo.reactions.get_by_id(gen_biomasa)
         bio_rxn.lower_bound = max_biomasa_mut * 1.0
 
         modelo.objective = gen_objetivo
         modelo.objective.direction = 'min'
-
         sol_prod = modelo.optimize()
 
         if sol_prod.status == 'optimal':
@@ -336,8 +298,6 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
     except Exception:
         pass
     return -1e6
-# ============================================================
-
 
 def analizar_termodinamica_cepa(modelo, quimico, genes_knockout):
     if not MODULOS_EXTERNOS_DISPONIBLES: return
@@ -346,18 +306,14 @@ def analizar_termodinamica_cepa(modelo, quimico, genes_knockout):
         if gen_id in modelo.genes:
             for rxn in modelo.genes.get_by_id(gen_id).reactions:
                 if rxn.id not in reacciones and not rxn.id.startswith("EX_"): reacciones.append(rxn.id)
-    try:
-        analizar_termodinamica_universal(modelo, reacciones[:10])
-    except:
-        pass
-
+    try: analizar_termodinamica_universal(modelo, reacciones[:10])
+    except: pass
 
 def mostrar_cinetica_local(modelo, quimico, genes_knockout):
     if not os.path.exists("cinetica_local.json"): return
     try:
         with open("cinetica_local.json", "r", encoding="utf-8") as f: db = json.load(f)
-    except:
-        return
+    except: return
     reacciones = [quimico]
     for gen_id in genes_knockout:
         if gen_id in modelo.genes:
@@ -373,8 +329,7 @@ def mostrar_cinetica_local(modelo, quimico, genes_knockout):
             encontrados += 1
     if encontrados > 0: console.print(tabla)
 
-
-# 🛠️ FIX 2: Unidades biológicas (mol/mol)
+# 🛠️ FIX 1: Unidades biológicas dinámicas (mol/mol)
 def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
@@ -396,19 +351,26 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
             if sol_final.status == 'optimal':
                 produccion = sol_final.objective_value
                 
-                # Calcula el rendimiento asumiendo 10 mmol/gDW/h de glucosa
-                rendimiento_mol_mol = produccion / 10.0
-                
-                console.print(f"   -> Fitness (Flujo):      [bold cyan]{produccion:.4f}[/bold cyan] mmol/gDW/h")
-                console.print(f"   -> Rendimiento Teórico: [bold green]{rendimiento_mol_mol:.3f}[/bold green] mol/mol")
+                # --- CÁLCULO HONESTO DEL RENDIMIENTO ---
+                try:
+                    # Leemos la captación real de glucosa del modelo
+                    glc_uptake = abs(modelo.reactions.get_by_id("EX_glc__D_e").lower_bound)
+                    if glc_uptake == 0: glc_uptake = 10.0 # Fallback de seguridad
+                except:
+                    glc_uptake = 10.0
+                    
+                rendimiento_mol_mol = produccion / glc_uptake
+
+                console.print(f"   -> Fitness (Flujo Garantizado): [bold cyan]{produccion:.4f}[/bold cyan] mmol/gDW/h")
+                console.print(f"   -> Rendimiento Teórico:       [bold green]{rendimiento_mol_mol:.3f}[/bold green] mol/mol")
+                console.print(f"   [dim](Calculado sobre una captación de glucosa de {glc_uptake} mmol/gDW/h)[/dim]")
                 
                 carga = sol_final.fluxes.abs().sum()
-                console.print(f"   -> Carga Metabolica:    [bold magenta]{carga:.2f}[/bold magenta]")
+                console.print(f"   -> Carga Metabolica:          [bold magenta]{carga:.2f}[/bold magenta]")
                 analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
                 mostrar_cinetica_local(modelo, quimico, genes_a_mutar)
     except Exception as e:
         console.print(f"[yellow]WARN[/yellow] Analisis fallo: {e}")
-
 
 def _exportar_resultado_json(modelo_id, quimico, metodo, genes, fitness, seed, parametros_extra=None):
     if not os.path.exists("reportes"): os.makedirs("reportes")
@@ -419,15 +381,13 @@ def _exportar_resultado_json(modelo_id, quimico, metodo, genes, fitness, seed, p
     df = pd.DataFrame([fila])
     df.to_csv(_RUTA_HISTORIAL_CSV, mode="a", header=not os.path.exists(_RUTA_HISTORIAL_CSV), index=False)
 
-
 def mostrar_historial():
     if not os.path.exists(_RUTA_HISTORIAL_CSV): return
     df = pd.read_csv(_RUTA_HISTORIAL_CSV)
     if df.empty: return
     console.print(df.tail(10).to_string())
 
-
-# 🛠️ FIX 4: Mutación real en el GA
+# 🛠️ FIX 2: Mutación real sin duplicados
 def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
@@ -452,10 +412,13 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
             hijo = list(set(p1[:3] + p2[3:]))
             if len(hijo) < mutaciones: hijo.append(random.choice(todos_los_genes))
             
-            # NUEVO: Mutación aleatoria (10% de probabilidad de cambiar un gen)
+            # Mutación evitando duplicados
             if random.random() < 0.1 and hijo:
                 idx = random.randint(0, len(hijo) - 1)
-                hijo[idx] = random.choice(todos_los_genes)
+                nuevo_gen = random.choice(todos_los_genes)
+                if nuevo_gen not in hijo:
+                    hijo[idx] = nuevo_gen
+                    hijo = list(set(hijo))
                 
             nueva.append({"genes": hijo, "fitness": evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)})
         poblacion = nueva
@@ -473,16 +436,11 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     console.print(tabla)
 
     if REPORTE_DISPONIBLE:
-        try:
-            generar_documento_markdown(modelo, modelo_id, quimico, mejor["genes"], mejor["fitness"])
-        except Exception as e:
-            console.print(f"[yellow]WARN[/yellow] Reporte fallo: {e}")
-    try:
-        _exportar_resultado_json(modelo_id, quimico, "ia", mejor["genes"], mejor["fitness"], seed, {"gens": gens, "mut": mutaciones})
-    except:
-        pass
+        try: generar_documento_markdown(modelo, modelo_id, quimico, mejor["genes"], mejor["fitness"])
+        except Exception as e: console.print(f"[yellow]WARN[/yellow] Reporte fallo: {e}")
+    try: _exportar_resultado_json(modelo_id, quimico, "ia", mejor["genes"], mejor["fitness"], seed, {"gens": gens, "mut": mutaciones})
+    except: pass
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
-
 
 def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
@@ -507,8 +465,7 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
             try:
                 fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
                 return max(0.0, fva_res.minimum.iloc[0])
-            except:
-                return 0.0
+            except: return 0.0
         return 0.0
 
     poblacion = []
@@ -524,10 +481,13 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
             hijo = list(set(p1[:2] + p2[2:]))
             if len(hijo) < max_mutaciones: hijo.append(random.choice(genes_candidatos))
             
-            # NUEVO: Mutación
+            # Mutación evitando duplicados
             if random.random() < 0.1 and hijo:
                 idx = random.randint(0, len(hijo) - 1)
-                hijo[idx] = random.choice(genes_candidatos)
+                nuevo_gen = random.choice(genes_candidatos)
+                if nuevo_gen not in hijo:
+                    hijo[idx] = nuevo_gen
+                    hijo = list(set(hijo))
                 
             nueva.append({"genes": hijo, "fitness": evaluar(hijo)})
         poblacion = nueva
@@ -535,14 +495,11 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
     mejor = sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
     if mejor["fitness"] > 0:
         console.print(f"\n[green]OK[/green] OptKnock exitoso. Ratio FVA: {mejor['fitness']:.4f}")
-        try:
-            _exportar_resultado_json(modelo_id, quimico, "optknock", mejor["genes"], mejor["fitness"], seed)
-        except:
-            pass
+        try: _exportar_resultado_json(modelo_id, quimico, "optknock", mejor["genes"], mejor["fitness"], seed)
+        except: pass
         analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
     else:
         console.print("\n[red]ERROR[/red] No se encontro acoplamiento.")
-
 
 def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
@@ -560,7 +517,6 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
 
     mejor_ratio = -1
     mejor_combo = []
-
     combinaciones = list(itertools.combinations(genes_activos, max_knockouts))
     console.print(f"   -> Evaluando {len(combinaciones)} combinaciones exactas...")
 
@@ -581,21 +537,17 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
                     if ratio > mejor_ratio:
                         mejor_ratio = ratio
                         mejor_combo = combo
-            except:
-                pass
+            except: pass
 
     if mejor_combo:
         console.print(f"\n[bold green]¡OptKnock Exacto Exitoso![/bold green]")
         console.print(f"Genes: {', '.join(mejor_combo)}")
         console.print(f"Ratio Real: {mejor_ratio:.4f}")
-        try:
-            _exportar_resultado_json(modelo_id, quimico, "optknock_exacto", mejor_combo, mejor_ratio, seed)
-        except:
-            pass
+        try: _exportar_resultado_json(modelo_id, quimico, "optknock_exacto", mejor_combo, mejor_ratio, seed)
+        except: pass
         analisis_profundo(modelo, gen_biomasa, mejor_combo, quimico)
     else:
         console.print("[red]No se encontró acoplamiento exacto.[/red]")
-
 
 def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
@@ -621,9 +573,13 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
             hijo = list(set(p1[:3] + p2[3:]))
             if len(hijo) < mutaciones: hijo.append(random.choice(todos_los_genes))
             
+            # Mutación evitando duplicados
             if random.random() < 0.1 and hijo:
                 idx = random.randint(0, len(hijo) - 1)
-                hijo[idx] = random.choice(todos_los_genes)
+                nuevo_gen = random.choice(todos_los_genes)
+                if nuevo_gen not in hijo:
+                    hijo[idx] = nuevo_gen
+                    hijo = list(set(hijo))
 
             nueva.append({"genes": hijo, "fitness": evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)})
         poblacion = nueva
@@ -633,20 +589,13 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
 
     if MODULOS_EXTERNOS_DISPONIBLES:
-        try:
-            generar_mapa_universal(modelo_id, quimico)
-        except:
-            pass
+        try: generar_mapa_universal(modelo_id, quimico)
+        except: pass
     if REPORTE_DISPONIBLE:
-        try:
-            generar_documento_markdown(modelo, modelo_id, quimico, mejor["genes"], mejor["fitness"])
-        except:
-            pass
-    try:
-        _exportar_resultado_json(modelo_id, quimico, "integral", mejor["genes"], mejor["fitness"], seed)
-    except:
-        pass
-
+        try: generar_documento_markdown(modelo, modelo_id, quimico, mejor["genes"], mejor["fitness"])
+        except: pass
+    try: _exportar_resultado_json(modelo_id, quimico, "integral", mejor["genes"], mejor["fitness"], seed)
+    except: pass
 
 def main():
     console.clear(); console.print(Panel.fit("[bold green]MetaboEngineer Pro V7.1 (PhD Fixed)[/bold green]", style="bold green"))
@@ -666,8 +615,7 @@ def main():
 
     try:
         opcion = Prompt.ask("Opcion", choices=list(ORGANISMOS.keys()) + claves_cache, default="2")
-    except:
-        return
+    except: return
 
     if opcion.startswith("c") and opcion != "c0":
         modelo_id = list(cacheados.keys())[int(opcion[1:]) - 1]
@@ -691,8 +639,7 @@ def main():
             modelo, msg = cargar_modelo_universal(modelo_id)
             modelo = configurar_ambiente(modelo, ambiente)
             
-            # 🛠️ FIX 1: Desactivado por inconsistencia de unidades
-            # modelo = aplicar_restricciones_cineticas(modelo) 
+            # aplicar_restricciones_cineticas(modelo) # Desactivado por inconsistencia de unidades
             
             console.print(f"[green]OK[/green] {msg} | {len(modelo.reactions)} reacciones | Ambiente: {ambiente.upper()}\n")
         except Exception as e:
@@ -703,8 +650,7 @@ def main():
         console.print("1. FBA | 2. IA | 3. OptKnock (GA) | 4. Integral | 5. Historial | 6. Limpiar Cache | 7. Inyectar Cafeína | 8. OptKnock Exacto (PhD) | 9. Salir")
         try:
             op = Prompt.ask("\nSelecciona una opcion", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"])
-        except:
-            break
+        except: break
 
         if op == "1":
             sol = modelo.optimize()
@@ -719,7 +665,6 @@ def main():
             console.print("[green]OK[/green] Ruta de cafeína inyectada.")
         elif op == "8": optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed)
         elif op == "9": break
-
 
 if __name__ == "__main__":
     main()
