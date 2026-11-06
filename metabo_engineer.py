@@ -382,7 +382,7 @@ def mostrar_historial():
     if df.empty: return
     console.print(df.tail(10).to_string())
 
-# 🛠️ FIX: Mutación real sin duplicados + Reproducibilidad (dict.fromkeys) + Relleno exacto
+# 🛠️ FIX 1, 2, 3: Relleno seguro con min(), retorno de 'mejor' y protección en tabla
 def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
@@ -404,10 +404,11 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
         nueva = mejores.copy()
         while len(nueva) < pop_size:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(dict.fromkeys(p1[:3] + p2[3:])) # FIX: Reproducibilidad
+            hijo = list(dict.fromkeys(p1[:3] + p2[3:]))
             
-            # FIX: Relleno exacto sin duplicados
-            while len(hijo) < mutaciones:
+            # FIX 3: Relleno seguro limitado por genes disponibles
+            objetivo = min(mutaciones, len(todos_los_genes))
+            while len(hijo) < objetivo:
                 nuevo = random.choice(todos_los_genes)
                 if nuevo not in hijo:
                     hijo.append(nuevo)
@@ -430,9 +431,13 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     tabla = Table(title="Genes a apagar (Knockouts)")
     tabla.add_column("ID (BiGG)", style="cyan"); tabla.add_column("Nombre Real", style="magenta"); tabla.add_column("Funcion Proteica", style="green")
     for g in mejor["genes"]:
-        nombre_local = modelo.genes.get_by_id(g).name
-        nombre_real, funcion = (nombre_local, "Modelo local") if (nombre_local and nombre_local != g) else traducir_gen_uniprot(g, id_uniprot)
-        tabla.add_row(g, nombre_real, funcion[:50] + "..." if len(funcion) > 50 else funcion)
+        # FIX 1: Seguridad para que no explote si el gen no existe
+        if g in modelo.genes:
+            nombre_local = modelo.genes.get_by_id(g).name
+            nombre_real, funcion = (nombre_local, "Modelo local") if (nombre_local and nombre_local != g) else traducir_gen_uniprot(g, id_uniprot)
+            tabla.add_row(g, nombre_real, funcion[:50] + "..." if len(funcion) > 50 else funcion)
+        else:
+            tabla.add_row(g, "Desconocido", "No en modelo")
     console.print(tabla)
 
     if REPORTE_DISPONIBLE:
@@ -441,6 +446,9 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     try: _exportar_resultado_json(modelo_id, quimico, "ia", mejor["genes"], mejor["fitness"], seed, {"gens": gens, "mut": mutaciones})
     except: pass
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
+    
+    # FIX 2: Retornar mejor
+    return mejor
 
 def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
@@ -478,10 +486,11 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
         nueva = mejores.copy()
         while len(nueva) < pop_size:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(dict.fromkeys(p1[:2] + p2[2:])) # FIX: Reproducibilidad
+            hijo = list(dict.fromkeys(p1[:2] + p2[2:]))
             
-            # FIX: Relleno exacto sin duplicados
-            while len(hijo) < max_mutaciones:
+            # FIX 3: Relleno seguro
+            objetivo = min(max_mutaciones, len(genes_candidatos))
+            while len(hijo) < objetivo:
                 nuevo = random.choice(genes_candidatos)
                 if nuevo not in hijo:
                     hijo.append(nuevo)
@@ -505,6 +514,8 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
         analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
     else:
         console.print("\n[red]ERROR[/red] No se encontro acoplamiento.")
+        
+    return mejor
 
 def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
@@ -575,10 +586,11 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
         nueva = mejores.copy()
         while len(nueva) < pop_size:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(dict.fromkeys(p1[:3] + p2[3:])) # FIX: Reproducibilidad
+            hijo = list(dict.fromkeys(p1[:3] + p2[3:]))
             
-            # FIX: Relleno exacto sin duplicados
-            while len(hijo) < mutaciones:
+            # FIX 3: Relleno seguro
+            objetivo = min(mutaciones, len(todos_los_genes))
+            while len(hijo) < objetivo:
                 nuevo = random.choice(todos_los_genes)
                 if nuevo not in hijo:
                     hijo.append(nuevo)
@@ -606,6 +618,8 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
         except: pass
     try: _exportar_resultado_json(modelo_id, quimico, "integral", mejor["genes"], mejor["fitness"], seed)
     except: pass
+    
+    return mejor
 
 def main():
     console.clear(); console.print(Panel.fit("[bold green]MetaboEngineer Pro V7.1 (PhD Fixed)[/bold green]", style="bold green"))
