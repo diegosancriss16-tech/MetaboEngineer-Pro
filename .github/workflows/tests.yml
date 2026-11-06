@@ -16,24 +16,23 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-        
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest pytest-cov
-        
-    - name: Descargar modelo para tests (FIX 301)
+
+    - name: Descargar iML1515 para tests (FIX 301)
       run: |
-        curl -L -o iML1515.xml "https://bigg.ucsd.edu/static/models/iML1515.xml"
-        curl -L -o textbook.xml "http://bigg.ucsd.edu/static/models/textbook.xml"
-        
+        # Solo iML1515. textbook/e_coli_core viene bundleado en COBRApy.
+        curl -fL -o iML1515.xml "https://bigg.ucsd.edu/static/models/iML1515.xml"
+
     - name: Run tests
       run: |
-        # Ignoramos los tests antiguos que validaban el comportamiento pre-auditoría
         pytest --ignore=tests/test_validation_papers.py --ignore=tests/test_validation_phd.py

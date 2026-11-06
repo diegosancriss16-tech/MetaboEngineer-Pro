@@ -6,17 +6,18 @@ están disponibles automáticamente en todos los archivos test_*.py.
 """
 
 import pytest
-import metabo_engineer as me
+from cobra.io import load_model
 
 
 @pytest.fixture(scope="session")
 def modelo_textbook():
     """
     Carga el modelo textbook UNA vez para toda la sesión de tests.
-    Es local (no requiere internet) y pequeño (95 reacciones) → rápido.
+
+    - 'textbook' es un alias de 'e_coli_core', incluido en COBRApy.
+    - No requiere internet ni archivo externo → funciona en CI sin curl.
     """
-    modelo, _ = me.cargar_modelo_universal("textbook")
-    return modelo
+    return load_model("textbook")
 
 
 @pytest.fixture

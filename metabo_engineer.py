@@ -31,7 +31,7 @@ try:
     from visualizador_universal import generar_mapa_universal
     from modulo_termodinamica_v2 import analizar_termodinamica_universal, construir_reaccion
     MODULOS_EXTERNOS_DISPONIBLES = True
-except ImportError as e:
+except ImportError:
     pass
 
 REPORTE_DISPONIBLE = False
@@ -52,6 +52,9 @@ ORGANISMOS = {
 _RUTA_HISTORIAL_CSV = "reportes/historial.csv"
 _RUTA_CACHE_UNIPROT = "cache_uniprot.json"
 _RUTA_INDICE = "modelos/_index.json"
+
+# Modelos bundleados en COBRApy (no requieren red ni archivo externo)
+_MODELOS_BUNDLED = {"textbook", "e_coli_core"}
 
 
 def setup_logger():
@@ -183,22 +186,33 @@ def _sincronizar_indice():
 
 
 def cargar_modelo_universal(modelo_id):
-    if not modelo_id or not str(modelo_id).strip(): raise Exception("ID de modelo vacio.")
+    if not modelo_id or not str(modelo_id).strip():
+        raise Exception("ID de modelo vacio.")
     modelo_id = str(modelo_id).strip()
 
-    # FIX CI: leer modelo desde el directorio actual (GitHub Actions hace curl)
-    # Se devuelve TUPLA (modelo, msg) igual que el resto de ramas.
+    # 1) Modelos bundleados en COBRApy: no requieren red ni archivo externo.
+    if modelo_id in _MODELOS_BUNDLED:
+        try:
+            modelo = load_model(modelo_id)
+            return modelo, f"Modelo '{modelo_id}' cargado desde bundle COBRApy."
+        except Exception as e:
+            raise Exception(f"No se pudo cargar '{modelo_id}' desde bundle COBRApy: {e}")
+
+    # 2) FIX CI: leer desde CWD (el workflow hace curl de iML1515.xml a ./)
     ruta_cwd = f"{modelo_id}.xml"
     if os.path.exists(ruta_cwd):
         modelo = read_sbml_model(ruta_cwd)
         return modelo, f"Modelo '{modelo_id}' cargado desde {ruta_cwd} (CI)."
 
+    # 3) Cache local en modelos/
     if not os.path.exists("modelos"): os.makedirs("modelos")
     ruta_local = f"modelos/{modelo_id}.xml"
     if os.path.exists(ruta_local):
         modelo = read_sbml_model(ruta_local)
         _registrar_modelo(modelo, modelo_id, ruta_local, "local")
         return modelo, f"Modelo '{modelo_id}' cargado desde disco local."
+
+    # 4) Descarga via cobrapy (último recurso, requiere red)
     try:
         modelo = load_model(modelo_id)
         try:
@@ -259,7 +273,6 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
             continue
 
         m = modelo.copy()
-        # FIX DEFINITIVO: Usar la función nativa de COBRApy que respeta GPR
         with m:
             knock_out_model_genes(m, [gen.id])
             m.objective = gen_biomasa
@@ -295,39 +308,26 @@ def aplicar_restricciones_cineticas(modelo):
 #    Esto captura acoplamientos "knife-edge" como atpB (1.5562 a 100%).
 # ============================================================
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
-    """
-    Fitness = FVA-mínimo real a 100% del crecimiento (RobustKnock).
-
-    - LP 1: crecimiento máximo del mutante.
-    - LP 2: fijar crecimiento al 100% (knife-edge) y MINIMIZAR el producto.
-
-    Retorna:
-        -1e6 si la solución es letal (penalización para el GA)
-        producción mínima garantizada (>= 0) si es viable
-    """
     modelo = modelo_base.copy()
 
-    # FIX DEFINITIVO: Usar la función nativa de COBRApy que respeta GPR
     for gen_id in genes_apagados:
         if gen_id in modelo.genes:
             modelo.genes.get_by_id(gen_id).knock_out()
 
     try:
-        # --- LP 1: Crecimiento máximo del mutante ---
         modelo.objective = gen_biomasa
         sol_biomasa = modelo.optimize()
 
         if sol_biomasa.status != 'optimal' or sol_biomasa.objective_value < 0.05:
-            return -1e6  # Letal
+            return -1e6
 
         max_biomasa_mut = sol_biomasa.objective_value
 
-        # --- LP 2: Fijar crecimiento al 100% y MINIMIZAR el producto ---
         bio_rxn = modelo.reactions.get_by_id(gen_biomasa)
-        bio_rxn.lower_bound = max_biomasa_mut * 1.0  # knife-edge: 100%
+        bio_rxn.lower_bound = max_biomasa_mut * 1.0
 
         modelo.objective = gen_objetivo
-        modelo.objective.direction = 'min'  # FVA-mínimo real (RobustKnock)
+        modelo.objective.direction = 'min'
 
         sol_prod = modelo.optimize()
 
@@ -378,7 +378,6 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
 
-    # FIX DEFINITIVO
     for gen_id in genes_a_mutar:
         if gen_id in modelo_mut.genes:
             modelo_mut.genes.get_by_id(gen_id).knock_out()
@@ -563,7 +562,6 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
                     if ratio > mejor_ratio:
                         mejor_ratio = ratio
                         mejor_combo = combo
-                        mejor_prod = prod_garantizada
             except:
                 pass
 
