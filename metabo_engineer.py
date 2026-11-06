@@ -329,7 +329,7 @@ def mostrar_cinetica_local(modelo, quimico, genes_knockout):
             encontrados += 1
     if encontrados > 0: console.print(tabla)
 
-# 🛠️ FIX 1: Unidades biológicas dinámicas (mol/mol)
+# 🛠️ FIX: Unidades biológicas dinámicas (mol/mol) + Garantizado (min 100%) vs Optimista (max 90%)
 def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
@@ -344,31 +344,41 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
 
         if sol_bio.status == 'optimal':
             max_bio = sol_bio.objective_value
+            
+            # 1. Mínimo Garantizado al 100% (FVA-min, lo que ve el GA)
+            modelo_mut.reactions.get_by_id(gen_biomasa).lower_bound = max_bio * 1.0
+            modelo_mut.objective = quimico
+            modelo_mut.objective.direction = 'min'
+            sol_garantizado = modelo_mut.optimize()
+            prod_garantizada = max(0.0, sol_garantizado.objective_value) if sol_garantizado.status == 'optimal' else 0.0
+
+            # 2. Máximo Optimista al 90% (FBA max, el techo teórico)
             modelo_mut.reactions.get_by_id(gen_biomasa).lower_bound = max_bio * 0.9
             modelo_mut.objective = quimico
-            sol_final = modelo_mut.optimize()
+            modelo_mut.objective.direction = 'max'
+            sol_max = modelo_mut.optimize()
+            prod_max_90 = max(0.0, sol_max.objective_value) if sol_max.status == 'optimal' else 0.0
 
-            if sol_final.status == 'optimal':
-                produccion = sol_final.objective_value
+            # 3. Cálculo dinámico de rendimiento sobre el mínimo garantizado
+            try:
+                glc_uptake = abs(modelo.reactions.get_by_id("EX_glc__D_e").lower_bound)
+                if glc_uptake == 0: glc_uptake = 10.0
+            except:
+                glc_uptake = 10.0
                 
-                # --- CÁLCULO HONESTO DEL RENDIMIENTO ---
-                try:
-                    # Leemos la captación real de glucosa del modelo
-                    glc_uptake = abs(modelo.reactions.get_by_id("EX_glc__D_e").lower_bound)
-                    if glc_uptake == 0: glc_uptake = 10.0 # Fallback de seguridad
-                except:
-                    glc_uptake = 10.0
-                    
-                rendimiento_mol_mol = produccion / glc_uptake
+            rendimiento_mol_mol = prod_garantizada / glc_uptake
 
-                console.print(f"   -> Fitness (Flujo Garantizado): [bold cyan]{produccion:.4f}[/bold cyan] mmol/gDW/h")
-                console.print(f"   -> Rendimiento Teórico:       [bold green]{rendimiento_mol_mol:.3f}[/bold green] mol/mol")
-                console.print(f"   [dim](Calculado sobre una captación de glucosa de {glc_uptake} mmol/gDW/h)[/dim]")
+            console.print(f"   -> Fitness (Garantizado @100%): [bold cyan]{prod_garantizada:.4f}[/bold cyan] mmol/gDW/h")
+            console.print(f"   -> Rendimiento (Garantizado): [bold green]{rendimiento_mol_mol:.3f}[/bold green] mol/mol")
+            console.print(f"   [dim](Calculado sobre una captación de glucosa de {glc_uptake} mmol/gDW/h)[/dim]")
+            console.print(f"   -> Cota Superior (@90% crecimiento): [bold yellow]{prod_max_90:.4f}[/bold yellow] mmol/gDW/h")
+            
+            if sol_max.status == 'optimal':
+                carga = sol_max.fluxes.abs().sum()
+                console.print(f"   -> Carga Metabolica (Max@90%): [bold magenta]{carga:.2f}[/bold magenta]")
                 
-                carga = sol_final.fluxes.abs().sum()
-                console.print(f"   -> Carga Metabolica:          [bold magenta]{carga:.2f}[/bold magenta]")
-                analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
-                mostrar_cinetica_local(modelo, quimico, genes_a_mutar)
+            analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
+            mostrar_cinetica_local(modelo, quimico, genes_a_mutar)
     except Exception as e:
         console.print(f"[yellow]WARN[/yellow] Analisis fallo: {e}")
 
@@ -387,7 +397,7 @@ def mostrar_historial():
     if df.empty: return
     console.print(df.tail(10).to_string())
 
-# 🛠️ FIX 2: Mutación real sin duplicados
+# 🛠️ FIX: Mutación real sin duplicados + Reproducibilidad (dict.fromkeys)
 def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
@@ -409,7 +419,7 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
         nueva = mejores.copy()
         while len(nueva) < pop_size:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(set(p1[:3] + p2[3:]))
+            hijo = list(dict.fromkeys(p1[:3] + p2[3:])) # FIX: Reproducibilidad
             if len(hijo) < mutaciones: hijo.append(random.choice(todos_los_genes))
             
             # Mutación evitando duplicados
@@ -418,7 +428,7 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
                 nuevo_gen = random.choice(todos_los_genes)
                 if nuevo_gen not in hijo:
                     hijo[idx] = nuevo_gen
-                    hijo = list(set(hijo))
+                    hijo = list(dict.fromkeys(hijo))
                 
             nueva.append({"genes": hijo, "fitness": evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)})
         poblacion = nueva
@@ -478,7 +488,7 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
         nueva = mejores.copy()
         while len(nueva) < pop_size:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(set(p1[:2] + p2[2:]))
+            hijo = list(dict.fromkeys(p1[:2] + p2[2:])) # FIX: Reproducibilidad
             if len(hijo) < max_mutaciones: hijo.append(random.choice(genes_candidatos))
             
             # Mutación evitando duplicados
@@ -487,7 +497,7 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
                 nuevo_gen = random.choice(genes_candidatos)
                 if nuevo_gen not in hijo:
                     hijo[idx] = nuevo_gen
-                    hijo = list(set(hijo))
+                    hijo = list(dict.fromkeys(hijo))
                 
             nueva.append({"genes": hijo, "fitness": evaluar(hijo)})
         poblacion = nueva
@@ -570,7 +580,7 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
         nueva = mejores.copy()
         while len(nueva) < pop_size:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(set(p1[:3] + p2[3:]))
+            hijo = list(dict.fromkeys(p1[:3] + p2[3:])) # FIX: Reproducibilidad
             if len(hijo) < mutaciones: hijo.append(random.choice(todos_los_genes))
             
             # Mutación evitando duplicados
@@ -579,7 +589,7 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
                 nuevo_gen = random.choice(todos_los_genes)
                 if nuevo_gen not in hijo:
                     hijo[idx] = nuevo_gen
-                    hijo = list(set(hijo))
+                    hijo = list(dict.fromkeys(hijo))
 
             nueva.append({"genes": hijo, "fitness": evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)})
         poblacion = nueva
@@ -638,9 +648,6 @@ def main():
         try:
             modelo, msg = cargar_modelo_universal(modelo_id)
             modelo = configurar_ambiente(modelo, ambiente)
-            
-            # aplicar_restricciones_cineticas(modelo) # Desactivado por inconsistencia de unidades
-            
             console.print(f"[green]OK[/green] {msg} | {len(modelo.reactions)} reacciones | Ambiente: {ambiente.upper()}\n")
         except Exception as e:
             console.print(Panel(str(e), title="ERROR", border_style="red")); return

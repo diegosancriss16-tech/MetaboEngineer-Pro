@@ -12,7 +12,7 @@
 [![eQuilibrator](https://img.shields.io/badge/eQuilibrator-%E2%89%A50.4-purple.svg)](https://equilibrator.weizmann.ac.il/)
 [![Tests](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml/badge.svg)](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml)
 
-**MetaboEngineer Pro** integra algoritmos genéticos (con mutación real y prevención de duplicados), acoplamiento de crecimiento (OptKnock), validación termodinámica (eQuilibrator) y extracción de datos genómicos (UniProt/Rhea) en una sola interfaz. Implementa un **Filtro de Esencialidad validado gen-a-gen** y simulación de ambientes aerobios/anaerobios con cálculo dinámico de rendimiento biológico.
+**MetaboEngineer Pro** integra algoritmos genéticos (con mutación real y reproducibilidad determinista), acoplamiento de crecimiento (OptKnock), validación termodinámica (eQuilibrator) y extracción de datos genómicos (UniProt/Rhea) en una sola interfaz. Implementa un **Filtro de Esencialidad validado gen-a-gen** y simulación de ambientes aerobios/anaerobios con cálculo dinámico de rendimiento biológico.
 
 ---
 
@@ -36,7 +36,7 @@
 
 | Módulo | Descripción |
 |---|---|
-| **Búsqueda heurística (GA)** | Algoritmo genético con cruce y mutación (libre de duplicados) para explorar combinaciones de knockouts. |
+| **Búsqueda heurística (GA)** | Algoritmo genético con cruce y mutación (libre de duplicados) y orden determinista para reproducibilidad. |
 | **OptKnock exacto (k≤2)** | Enumeración exhaustiva para obtener el óptimo demostrable. |
 | **Filtro de Esencialidad** | Validado gen-a-gen contra datos experimentales (Keio). Evita soluciones letales. |
 | **Ambientes Controlados** | Simulación estricta de condiciones **aerobias** (bloqueo de fermentación) o **anaerobias** (bloqueo de O2). |
@@ -73,6 +73,8 @@ Para validar el motor de esencialidad, comparamos `single_gene_deletion` contra 
 ---
 
 ## 🧬 Resultados del GA (Epistasis y Estocasticidad)
+
+*(Nota: Los resultados de k=3 y k=5 mostrados a continuación fueron generados con la versión 0.1.0 del GA, antes de la implementación de la mutación real y la corrección de reproducibilidad de semilla. Se planea regenerarlos para la v0.2.0).*
 
 ### k=3 (experimento inicial, 3 semillas)
 
@@ -169,7 +171,6 @@ pip install -r requirements.txt
 
 # 4. Ejecuta
 python metabo_engineer.py
-
 ⚡ Uso rápido
 Menú interactivo:
 
@@ -245,6 +246,12 @@ iML1515: Monk, J. M., et al. (2017). iML1515, a knowledgebase that computes Esch
 Jantama et al.: Jantama, K., et al. (2008). Combining metabolic engineering and metabolic evolution to develop nonrecombinant strains of Escherichia coli C that produce succinate. Biotechnology and Bioengineering, 99(5), 1140-1153.
 
 eQuilibrator: Flamholz, A., et al. (2012). eQuilibrator—the biochemical thermodynamics calculator. Nucleic Acids Research, 40(D1), D770-D775.
+
+BiGG Models: King, Z. A., et al. (2016). BiGG Models: A platform for integrating, standardizing and sharing genome-scale models. Nucleic Acids Research, 44(D1), D515-D522.
+
+UniProt: UniProt Consortium. (2023). UniProt: the Universal Protein Knowledgebase in 2023. Nucleic Acids Research, 51(D1), D523-D531.
+
+Rhea: Bansal, P., et al. (2022). Rhea, the reaction knowledgebase in 2022. Nucleic Acids Research, 50(D1), D693-D700.
 
 📄 Licencia
 Este proyecto está licenciado bajo la PolyForm Noncommercial License 1.0.0.

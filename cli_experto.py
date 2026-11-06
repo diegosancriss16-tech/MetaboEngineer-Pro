@@ -63,7 +63,7 @@ def metodo_ia(modelo, quimico, args):
         nueva = mejores.copy()
         while len(nueva) < args.poblacion:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(set(p1[:3] + p2[3:]))
+            hijo = list(dict.fromkeys(p1[:3] + p2[3:])) # FIX: Reproducibilidad
             if len(hijo) < args.mutaciones: hijo.append(random.choice(todos_los_genes))
             
             # Mutación evitando duplicados
@@ -72,7 +72,7 @@ def metodo_ia(modelo, quimico, args):
                 nuevo_gen = random.choice(todos_los_genes)
                 if nuevo_gen not in hijo:
                     hijo[idx] = nuevo_gen
-                    hijo = list(set(hijo))
+                    hijo = list(dict.fromkeys(hijo))
                     
             nueva.append({"genes": hijo, "fitness": evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)})
         poblacion = nueva
@@ -112,7 +112,7 @@ def metodo_optknock(modelo, quimico, args):
         nueva = mejores.copy()
         while len(nueva) < args.poblacion:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(set(p1[:2] + p2[2:]))
+            hijo = list(dict.fromkeys(p1[:2] + p2[2:])) # FIX: Reproducibilidad
             if len(hijo) < args.mutaciones: hijo.append(random.choice(genes_candidatos))
             
             # Mutación evitando duplicados
@@ -121,7 +121,7 @@ def metodo_optknock(modelo, quimico, args):
                 nuevo_gen = random.choice(genes_candidatos)
                 if nuevo_gen not in hijo:
                     hijo[idx] = nuevo_gen
-                    hijo = list(set(hijo))
+                    hijo = list(dict.fromkeys(hijo))
                     
             nueva.append({"genes": hijo, "fitness": evaluar(hijo)})
         poblacion = nueva
