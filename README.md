@@ -1,3 +1,5 @@
+> **Required Notice:** Copyright Diego San Cristobal (https://github.com/diegosancriss16-tech/MetaboEngineer-Pro)
+
 # 🧬 MetaboEngineer Pro (V6.0)
 
 > Suite integral de ingeniería metabólica y biología sintética para el diseño racional de cepas microbianas basada en IA y validación biológica.
@@ -76,6 +78,62 @@ Durante el desarrollo, se detectó una discrepancia aparente entre nuestra herra
 
 Este ciclo *(discrepancia → forense → instrumento defectuoso → fix → validación)* es exactamente el aseguramiento de calidad que distingue una herramienta científica seria de un script de fin de semana. La herramienta siempre produjo resultados correctos.
 
+## 📊 Resultados preliminares del benchmark
+
+Comparación interna entre el GA (`disenar_cepa_ia`) y el OptKnock exacto
+(`optknock_exacto_milp`, búsqueda combinatoria k=1) sobre iML1515 en M9
+glucosa. Métricas: producción máxima a 90% del crecimiento del mutante
+(objetivo del GA) y producción mínima garantizada a 100% del crecimiento
+(objetivo del OptKnock exacto). `ratio` = acoplamiento crecimiento-producto
+(métrica de Burgard et al. 2003).
+
+### Succinato anaerobio (caso clásico de OptKnock)
+
+| Método | Genes KO | Max @90% | Min @100% | Ratio | Crec. mut | Tiempo |
+|---|---|---|---|---|---|---|
+| WT baseline | — | 3.675 | 0.053 | 0.334 | 0.158 | — |
+| GA (10 gen, 20 pop) | ilvH, fdhF, mutT | 3.675 | 0.053 | 0.334 | 0.158 | 1671 s |
+| OptKnock exacto (k=1) | **atpB (b3731)** | **10.70** | **1.556** | **79.29** | 0.112 | **88 s** |
+
+**Lectura honesta**: el GA no supera al WT en este caso (empató en fitness).
+El OptKnock exacto encuentra el knockout canónico `atpB` (ATP sintasa), que
+aumenta el acoplamiento crecimiento-succinato **237×** sobre WT, en **19×
+menos tiempo**. Este resultado es consistente con Burgard et al. 2003.
+
+### Acetato aerobio
+
+| Método | Genes KO | Max @90% | Min @100% | Crec. mut | Tiempo |
+|---|---|---|---|---|---|
+| WT baseline | — | 3.587 | 0.000 | 0.877 | — |
+| GA (10 gen, 20 pop) | kdgT, rbsC, nuoK | 3.756 | 0.000 | 0.759 | 1502 s |
+| OptKnock exacto (k=1) | (sin solución) | — | — | — | 371 s |
+
+**Lectura honesta**: el GA encuentra un diseño que mejora la producción
+puntual un 4.7% a costa de reducir el crecimiento un 13.5%, pero **sin
+acoplamiento** (min@100% = 0). En biorreactor continuo el diseño es
+seleccionado negativamente por la célula. Ningún método encuentra
+acoplamiento porque acetato en aerobio no es un producto acoplable en
+iML1515.
+
+### Conclusión preliminar
+
+- El GA **no sustituye** a métodos exactos en k pequeño. El exacto
+  encuentra la respuesta canónica de la literatura; el GA no.
+- El **nicho real del GA** es exploración a k≥3, donde la combinatoria
+  hace inviable la búsqueda exacta (nuestro `optknock_exacto_milp` con
+  k=2 requiere 27,966 evaluaciones ≈ 7.5 h; k=3 es inabordable).
+- El **fitness interno** del GA (`max prod @90%`) y la **métrica de
+  acoplamiento** del OptKnock (`ratio`) miden objetivos distintos y no
+  son directamente comparables — de ahí que ambos se reporten.
+
+### Trabajo en curso (Fase 2)
+
+- Migrar a MILP bilevel real (`straindesign`) para comparación justa a
+  k≥3.
+- Mejorar el GA (multi-seed, mayor población, operadores que preserven
+  acoplamiento) o reposicionarlo como capa de exploración sobre OptKnock
+  exacto.
+- Validación gen-a-gen de esencialidad contra Keio (M9 glucosa).
 
 ## 🚀 Instalación
 

@@ -102,3 +102,5 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .coverage
+benchmark/results/
+data/
