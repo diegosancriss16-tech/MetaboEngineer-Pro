@@ -190,11 +190,13 @@ python cli_experto.py \
 ⚠️ Limitaciones conocidas
 BiGG puede fallar: el servidor tiene caídas intermitentes. Usa la descarga manual si es necesario.
 
-OptKnock heurístico: usamos un GA, no bilevel optimization exacto (MILP). Hit-rate estocástico: 33% en k=3 con presupuesto pequeño, 100% en k=5 con presupuesto real.
+OptKnock heurístico: usamos un GA, no bilevel optimization exacto (MILP).
 
-Atrapamiento en el valle de aptitud: el GA converge consistentemente al pico de ATP sintasa (~1.56) y no cruza el valle epistático hacia el óptimo global (7.79). El problema es de exploración, no de viabilidad.
+Hit-rates históricos: Los hit-rates del 33% (k=3) y 100% (k=5) reportados en la sección de Resultados se obtuvieron con la versión 0.1.0 (sin mutación ni reproducibilidad determinista). El GA actual (v0.1.0-beta) incluye estas mejoras, por lo que estos números están siendo re-evaluados para la v0.2.0.
 
-Cinética ausente: los parámetros kcat/Km no están incluidos por defecto (requieren API de pago de BRENDA).
+Atrapamiento en el valle de aptitud (en revisión): La conclusión de que "el GA no cruza el valle" se basó en el GA anterior. Está pendiente comprobar si el nuevo GA con mutación es capaz de cruzar el valle epistático hacia el óptimo global (7.79) en k=13.
+
+Cinética ausente: los parámetros kcat/Km no están incluidos por defecto (requieren API de pago de BRENDA) y han sido removidos de los reportes automáticos para evitar confusiones.
 
 eQuilibrator: requiere conexión a internet para descargar compuestos.
 
@@ -217,6 +219,7 @@ Margen de viabilidad fino en el óptimo: el diseño de 13 KOs tiene μ=0.0665, s
 ☑ Caracterización del valle de aptitud (5 intermedios, todos viables)
 ☑ Leave-one-out del diseño epistático (atpF + nrdD)
 ☑ Curva de robustez (retención 81.9% vs 2.2%)
+☑ GA con mutación real, reproducibilidad de semilla (dict.fromkeys) y relleno seguro
 □ GA con k=13: ¿Puede el GA cruzar el valle de aptitud y redescubrir el diseño experimental? Criterios pre-registrados: (a) éxito total: fitness ≥ 7.0; (b) parcial: fitness > 1.5612; (c) fracaso informativo: fitness ≈ 1.5562.
 □ Siembra de población: Incluir familias completas de KJ060 en la población inicial para facilitar el cruce del valle.
 □ Leave-family-out del diseño minimal: ¿Cuál es el subconjunto mínimo de las 13 que acopla? La familia PFL aporta solo +0.0116.
