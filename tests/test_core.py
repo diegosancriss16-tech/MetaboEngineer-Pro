@@ -8,6 +8,7 @@ Cubre:
 - Hashing SHA256
 """
 
+import math
 import pytest
 import metabo_engineer as me
 
@@ -50,10 +51,22 @@ class TestEvaluarBacteria:
         assert fitness >= 0.0
 
     def test_evaluar_knockout_extremo_no_crashea(self, modelo_textbook, gen_biomasa_textbook):
-        """Bloquear muchos genes no debe crashear, debe devolver >= 0."""
+        """
+        Bloquear muchos genes no debe crashear.
+
+        Contrato actual (Beta / RobustKnock FVA-min@100%):
+          - Si el mutante es viable → fitness >= 0
+          - Si el mutante es letal   → fitness == -1e6 (penalización GA)
+        Lo importante es que devuelva un número finito y no lance excepción.
+        """
         todos_los_genes = [g.id for g in modelo_textbook.genes[:20]]
         fitness = me.evaluar_bacteria(modelo_textbook, todos_los_genes, "EX_succ_e", gen_biomasa_textbook)
-        assert fitness >= 0.0
+
+        assert isinstance(fitness, (int, float))
+        assert not math.isnan(fitness)
+        assert not math.isinf(fitness)
+        # Acepta ambos contratos válidos: viable (>=0) o letal (-1e6)
+        assert fitness == -1e6 or fitness >= 0.0
 
     def test_evaluar_gen_inexistente_no_crashea(self, modelo_textbook, gen_biomasa_textbook):
         """Gen que no existe en el modelo debe ignorarse sin crashear."""
