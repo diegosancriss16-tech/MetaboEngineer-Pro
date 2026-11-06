@@ -1,4 +1,4 @@
-import warnings
+﻿import warnings
 warnings.filterwarnings("ignore")
 
 import os
@@ -30,6 +30,7 @@ def generar_mapa_universal(modelo_id="iYO844", quimico="EX_lys__L_e"):
 
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
     modelo.objective = quimico
+    modelo.solver = "glpk"  # GLPK: evita crash con licencia Gurobi restringida
     solucion = modelo.optimize()
 
     G = nx.DiGraph()
