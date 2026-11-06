@@ -1,4 +1,4 @@
-import argparse
+﻿import argparse
 import sys
 import pandas as pd
 from pathlib import Path
@@ -15,6 +15,7 @@ def main():
     p.add_argument("--model", required=True)
     p.add_argument("--data", required=True)
     p.add_argument("--default-medium", action="store_true")
+    p.add_argument("--rich-medium", action="store_true", help="Abrir todos los exchanges (LB) para igualar Keio")
     p.add_argument("--threshold", type=float, default=0.01)
     args = p.parse_args()
 
@@ -22,7 +23,12 @@ def main():
     model = read_sbml_model(args.model)
     model.solver = 'glpk'
 
-    if not args.default_medium:
+    if args.rich_medium:
+        print("Usando medio RICO (todos los exchanges abiertos excepto glucosa) para igualar Keio...")
+        for ex in model.exchanges:
+            if ex.id != 'EX_glc__D_e':
+                ex.bounds = (-1000, 1000)
+    elif not args.default_medium:
         model = me.configurar_ambiente(model, "aerobio")
         model.solver = 'glpk'
     else:
@@ -37,7 +43,7 @@ def main():
     print(f"  WT max growth: {wt_growth:.4f} 1/h")
     print(f"  Umbral de esencialidad: < {threshold_value:.4f} 1/h")
 
-    print("\n--- Ejecutando single_gene_deletion (esto tarda)... ---")
+    print("\n--- Ejecutando single_gene_deletion... ---")
     deletion_results = single_gene_deletion(model)
     
     predicted_essential = set()
@@ -46,58 +52,55 @@ def main():
         if row['growth'] < threshold_value:
             predicted_essential.add(gene_id)
 
-    print(f"  Predichos esenciales: {len(predicted_essential)}")
+    print(f"  Predichos esenciales (IDs del modelo): {len(predicted_essential)}")
 
     print(f"\n--- Cargando datos experimentales ---")
     df = pd.read_csv(args.data)
+    df.columns = [c.lower() for c in df.columns]
     
-    # Imprimir las primeras filas y columnas para diagnosticar
-    print(f"  Columnas del CSV: {df.columns.tolist()}")
-    print(f"  Primeras 3 filas:\n{df.head(3).to_string()}")
+    df['gene'] = df['gene'].astype(str).str.strip()
+    df['is_essential_exp'] = df['essential'].astype(int) == 1
+    
+    exp_essential_names = set(df[df['is_essential_exp']]['gene'])
+    exp_nonessential_names = set(df[~df['is_essential_exp']]['gene'])
+    
+    gene_name_to_id = {g.name: g.id for g in model.genes}
+    
+    exp_essential_ids = set()
+    for name in exp_essential_names:
+        if name in gene_name_to_id: exp_essential_ids.add(gene_name_to_id[name])
+        elif name in model.genes: exp_essential_ids.add(name)
+            
+    exp_nonessential_ids = set()
+    for name in exp_nonessential_names:
+        if name in gene_name_to_id: exp_nonessential_ids.add(gene_name_to_id[name])
+        elif name in model.genes: exp_nonessential_ids.add(name)
 
-    # Lógica universal para encontrar la columna del gen
-    gene_col = next((c for c in df.columns if c.lower() in ['gene', 'gene_id', 'id', 'b_number', 'locus']), df.columns[0])
-    
-    # Lógica universal para encontrar la columna de esencialidad
-    ess_col = next((c for c in df.columns if c.lower() in ['essential', 'essentiality', 'is_essential', 'status']), None)
-
-    df = df.dropna(subset=[gene_col])
-    df[gene_col] = df[gene_col].astype(str).str.strip()
-    
-    # Si hay columna de esencialidad, la usamos. Si no, asumimos que TODOS los genes en el CSV son esenciales.
-    if ess_col:
-        print(f"  Usando columna de esencialidad: '{ess_col}'")
-        df['is_essential_exp'] = df[ess_col].apply(lambda x: str(x).lower() in ['1', 'true', 'yes', 'essential', 'e'])
-    else:
-        print("  ⚠️ No hay columna de esencialidad explícita. Asumiendo que TODOS los genes en el CSV son esenciales.")
-        df['is_essential_exp'] = True
-    
-    exp_essential = set(df[df['is_essential_exp']][gene_col])
-    print(f"  Genes experimentales esenciales (en el CSV): {len(exp_essential)}")
-    
     model_genes = set(model.genes.list_attr("id"))
-    common_genes = model_genes.intersection(set(df[gene_col]))
+    
+    all_exp_genes = exp_essential_ids.union(exp_nonessential_ids)
+    common_genes = model_genes.intersection(all_exp_genes)
     
     if not common_genes:
-        print("❌ No hay genes en común entre el modelo y el CSV.")
-        print(f"   Ejemplo de gen en modelo: {list(model_genes)[0]}")
-        print(f"   Ejemplo de gen en CSV: {list(df[gene_col])[0]}")
+        print("❌ No hay genes en común.")
         return
 
-    pred_common = predicted_essential.intersection(common_genes)
-    exp_common = exp_essential.intersection(common_genes)
+    print(f"  Genes en común evaluados: {len(common_genes)}")
 
-    tp = len(pred_common.intersection(exp_common))
-    fp = len(pred_common - exp_common)
-    fn = len(exp_common - pred_common)
-    tn = len(common_genes) - tp - fp - fn
+    pred_common = predicted_essential.intersection(common_genes)
+    exp_ess_common = exp_essential_ids.intersection(common_genes)
+    exp_noness_common = exp_nonessential_ids.intersection(common_genes)
+
+    tp = len(pred_common.intersection(exp_ess_common))
+    fp = len(pred_common.intersection(exp_noness_common))
+    fn = len(exp_ess_common - pred_common)
+    tn = len(exp_noness_common - pred_common)
 
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
 
-    print("\n=== RESULTADOS GEN-A-GEN ===")
-    print(f"  Genes en común evaluados: {len(common_genes)}")
+    print("\n=== RESULTADOS GEN-A-GEN (REALES) ===")
     print(f"  TP: {tp}, FP: {fp}, FN: {fn}, TN: {tn}")
     print(f"  Precisión: {precision:.2%}")
     print(f"  Recall:    {recall:.2%}")
