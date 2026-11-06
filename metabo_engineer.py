@@ -185,6 +185,14 @@ def _sincronizar_indice():
 def cargar_modelo_universal(modelo_id):
     if not modelo_id or not str(modelo_id).strip(): raise Exception("ID de modelo vacio.")
     modelo_id = str(modelo_id).strip()
+
+    # FIX CI: leer modelo desde el directorio actual (GitHub Actions hace curl)
+    # Se devuelve TUPLA (modelo, msg) igual que el resto de ramas.
+    ruta_cwd = f"{modelo_id}.xml"
+    if os.path.exists(ruta_cwd):
+        modelo = read_sbml_model(ruta_cwd)
+        return modelo, f"Modelo '{modelo_id}' cargado desde {ruta_cwd} (CI)."
+
     if not os.path.exists("modelos"): os.makedirs("modelos")
     ruta_local = f"modelos/{modelo_id}.xml"
     if os.path.exists(ruta_local):
