@@ -1,14 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-MetaboEngineer Pro
-Suite integral de ingenieria metabolica y biologia sintetica.
-
-v0.2.5 — Correcciones finales:
-  [FIX-1] _evolucionar ignora semillas vacías (evita el ValueError cuando
-          falla la resolución de nombres a IDs de BiGG).
-  [FIX-2] Termodinámica sobre reacciones ACTIVAS.
-  [FIX-3] except: pass reemplazados por logging.warning en el hot-path.
-  [FIX-4] Umbrales de viabilidad unificados.
+MetaboEngineer Pro v0.2.6
+[FIX-1] Umbrales unificados en optknock (CRECIMIENTO_MIN vs ACTIVO).
+[FIX-2] Termodinámica ordena por flujo absoluto (top 10) en lugar de arbitrario.
+[FIX-3] _evolucionar lanza error si se pasan semillas pero ninguna es válida.
 """
 
 import warnings
@@ -39,12 +34,12 @@ from rich.panel import Panel
 
 console = Console()
 
-__version__ = "0.2.5"
+__version__ = "0.2.6"
 
 # Umbrales unificados
-UMBRAL_LETALIDAD_RELATIVA = 0.05    # 5% del WT para considerar un gen letal
-UMBRAL_CRECIMIENTO_MIN = 0.05       # Crecimiento mínimo absoluto para ser viable
-UMBRAL_ACTIVO = 0.01                # Flujo mínimo para considerar una reacción activa
+UMBRAL_LETALIDAD_RELATIVA = 0.05
+UMBRAL_CRECIMIENTO_MIN = 0.05
+UMBRAL_ACTIVO = 0.01
 
 MODULOS_EXTERNOS_DISPONIBLES = False
 try:
@@ -95,7 +90,7 @@ def _asegurar_solver_funcional(modelo):
     try:
         valor = modelo.slim_optimize()
         if valor is None or pd.isna(valor):
-            raise RuntimeError("La optimizacion devolvio un valor no numerico (posible fallo de licencia).")
+            raise RuntimeError("La optimizacion devolvio un valor no numerico.")
     except Exception as e:
         console.print(f"[yellow]WARN[/yellow] El solver activo no puede optimizar este modelo.")
         console.print(f"       Razón: {e}")
@@ -106,16 +101,14 @@ def _asegurar_solver_funcional(modelo):
             if valor is None or pd.isna(valor):
                  raise RuntimeError("GLPK tambien fallo silenciosamente.")
         except Exception as e_glpk:
-            console.print(f"[red]ERROR[/red] GLPK tampoco pudo optimizar el modelo. Revisa la instalación.")
-            console.print(f"       Detalle: {e_glpk}")
+            console.print(f"[red]ERROR[/red] GLPK tampoco pudo optimizar el modelo.")
     return modelo
 
 
 def configurar_ambiente(modelo, ambiente):
     ambiente_limpio = str(ambiente).lower().strip()
     if ambiente_limpio not in ['aerobio', 'anaerobio']:
-        raise ValueError(f"Ambiente '{ambiente}' no válido. Debe ser 'aerobio' o 'anaerobio'.")
-
+        raise ValueError(f"Ambiente '{ambiente}' no válido.")
     modelo_amb = modelo.copy()
     if 'EX_o2_e' in modelo_amb.reactions:
         if ambiente_limpio == 'anaerobio':
@@ -125,20 +118,17 @@ def configurar_ambiente(modelo, ambiente):
     else:
         if ambiente_limpio == 'anaerobio':
             console.print("[yellow]WARN[/yellow] El modelo no tiene EX_o2_e.")
-
     if ambiente_limpio == 'aerobio':
         for rxn in ["EX_etoh_e", "EX_lac__D_e", "EX_for_e"]:
             if rxn in modelo_amb.reactions:
                 modelo_amb.reactions.get_by_id(rxn).bounds = (0.0, 0.0)
-
-    modelo_amb = _asegurar_solver_funcional(modelo_amb)
-    return modelo_amb
+    return _asegurar_solver_funcional(modelo_amb)
 
 
 def _detectar_gen_biomasa(modelo):
     candidatas = [r.id for r in modelo.reactions if "biomass" in r.id.lower()]
     if not candidatas:
-        raise ValueError("El modelo no tiene una reaccion de biomasa identificable (buscando 'biomass' en el ID).")
+        raise ValueError("El modelo no tiene una reaccion de biomasa identificable.")
     return candidatas[0]
 
 
@@ -276,7 +266,7 @@ def cargar_modelo_universal(modelo_id):
         except: pass
         return modelo, f"Modelo '{nombre_base}' descargado via cobrapy."
     except Exception as e:
-        raise ValueError(f"No se pudo cargar el modelo '{nombre_base}' desde BiGG. Verifica tu conexión o descarga el XML manualmente. Error original: {e}")
+        raise ValueError(f"No se pudo cargar el modelo '{nombre_base}' desde BiGG. Error: {e}")
 
 
 def inyectar_ruta_heterologa(modelo, quimico):
@@ -333,7 +323,7 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
         except Exception as e:
             console.print(f"[yellow]WARN[/yellow] Error leyendo caché: {e}. Recalculando...")
 
-    console.print(f"[cyan]INFO[/cyan] Calculando filtro de esencialidad (esto puede tardar unos minutos)...")
+    console.print(f"[cyan]INFO[/cyan] Calculando filtro de esencialidad...")
 
     modelo_wt = modelo.copy()
     modelo_wt.solver = 'glpk'
@@ -341,10 +331,7 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
 
     sol_wt = modelo_wt.slim_optimize()
     if sol_wt is None or sol_wt < 0.01:
-        raise ValueError(
-            f"El organismo salvaje no crece en este ambiente (biomasa = {sol_wt}). "
-            "Revisa el medio o el ambiente antes de diseñar cepas."
-        )
+        raise ValueError(f"El organismo salvaje no crece en este ambiente (biomasa = {sol_wt}).")
 
     with modelo_wt:
         resultados = single_gene_deletion(modelo_wt, modelo_wt.genes)
@@ -372,13 +359,10 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _cache=None):
     if not genes_apagados:
         raise ValueError("La lista de genes a apagar está vacía. El GA necesita al menos un gen.")
-    
     if gen_objetivo not in modelo_base.reactions:
         raise ValueError(f"El químico objetivo '{gen_objetivo}' no existe en el modelo.")
-        
     if gen_biomasa not in modelo_base.reactions:
         raise ValueError(f"La reacción de biomasa '{gen_biomasa}' no existe en el modelo.")
-        
     for gen_id in genes_apagados:
         if gen_id not in modelo_base.genes:
             raise ValueError(f"El gen '{gen_id}' no existe en el modelo.")
@@ -413,19 +397,24 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _ca
     return resultado
 
 
-# 🛠️ FIX: _evolucionar ignora semillas vacías
+# 🛠️ FIX: _evolucionar lanza error si se pasan semillas pero ninguna es válida
 def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_split=3, descripcion="Evolucionando...", semillas=None):
     poblacion = []
     
     if semillas:
+        semillas_validas = 0
         for s in semillas[:pop_size]:
             s_list = list(s)
-            if not s_list:  # Evita el ValueError si la semilla está vacía
+            if not s_list:
                 continue
             try:
                 poblacion.append({"genes": s_list, "fitness": fitness_fn(s_list)})
-            except ValueError:
-                continue  # Si la semilla no pasa la validación, la ignoramos
+                semillas_validas += 1
+            except ValueError as e:
+                logging.warning(f"Semilla descartada: {e}")
+                
+        if semillas_validas == 0:
+            raise ValueError("Se proporcionaron semillas, pero NINGUNA es válida para este modelo.")
             
     while len(poblacion) < pop_size:
         gm = random.sample(pool_genes, min(k, len(pool_genes)))
@@ -458,10 +447,12 @@ def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_sp
     return max(poblacion, key=lambda x: x["fitness"])
 
 
+# 🛠️ FIX: Termodinámica ordena por flujo absoluto
 def analizar_termodinamica_cepa(modelo, solucion, quimico):
     if not MODULOS_EXTERNOS_DISPONIBLES: return
-    reacciones_activas = [r for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
-    reacciones = [quimico] + reacciones_activas[:10]
+    flujos = [(r, abs(v)) for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
+    flujos.sort(key=lambda x: x[1], reverse=True)
+    reacciones = [quimico] + [r for r, v in flujos[:10]]
     try: 
         analizar_termodinamica_universal(modelo, reacciones)
     except Exception as e:
@@ -474,8 +465,9 @@ def mostrar_cinetica_local(modelo, solucion, quimico):
         with open("cinetica_local.json", "r", encoding="utf-8") as f: db = json.load(f)
     except: return
     
-    reacciones_activas = [r for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
-    reacciones = [quimico] + reacciones_activas
+    flujos = [(r, abs(v)) for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
+    flujos.sort(key=lambda x: x[1], reverse=True)
+    reacciones = [quimico] + [r for r, v in flujos[:10]]
     
     tabla = Table(title="Parametros Cineticos (Datos Locales)")
     tabla.add_column("Reaccion", style="cyan"); tabla.add_column("Enzima", style="magenta"); tabla.add_column("kcat (1/s)"); tabla.add_column("Km (mM)")
@@ -525,8 +517,7 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
             try:
                 glc_uptake = abs(modelo.reactions.get_by_id("EX_glc__D_e").lower_bound)
                 if glc_uptake == 0: glc_uptake = 10.0
-            except:
-                glc_uptake = 10.0
+            except: glc_uptake = 10.0
                 
             rendimiento_mol_mol = prod_g100 / glc_uptake
 
@@ -583,7 +574,6 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
 
     if mejor["fitness"] <= -1e5:
         console.print("\n[red]ERROR[/red] TODAS las evaluaciones fallaron (fitness = -1e6).")
-        console.print("       Este resultado NO es interpretable. Corrige el solver y re-corre.")
         return mejor
 
     console.print(f"\n[green]OK[/green] Diseno completado. Fitness (FVA-min@100%): {mejor['fitness']:.4f}\n")
@@ -633,7 +623,8 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
         m.objective = gen_biomasa
         sol = m.optimize()
         resultado = 0.0
-        if sol.status == 'optimal' and sol.objective_value is not None and sol.objective_value > UMBRAL_ACTIVO:
+        # 🛠️ FIX: Umbral de crecimiento unificado
+        if sol.status == 'optimal' and sol.objective_value is not None and sol.objective_value > UMBRAL_CRECIMIENTO_MIN:
             try:
                 fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
                 resultado = max(0.0, fva_res.minimum.iloc[0])
@@ -671,7 +662,7 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
 
     console.print("\n[cyan]INFO[/cyan] Buscando el óptimo exacto (enumeración exhaustiva)...")
     sol_wt = modelo.optimize()
-    reacciones_activas = [r for r, v in sol_wt.fluxes.items() if abs(v) > 0.1 and not r.startswith("EX_")]
+    reacciones_activas = [r for r, v in sol_wt.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
     genes_activos = sorted(list({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes}))
 
     mejor_ratio = -1
@@ -687,7 +678,8 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
         m.objective = gen_biomasa
         sol_bio = m.optimize()
 
-        if sol_bio.status == 'optimal' and sol_bio.objective_value is not None and sol_bio.objective_value > 0.1:
+        # 🛠️ FIX: Umbrales unificados
+        if sol_bio.status == 'optimal' and sol_bio.objective_value is not None and sol_bio.objective_value > UMBRAL_CRECIMIENTO_MIN:
             try:
                 fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
                 prod_garantizada = fva_res.minimum.iloc[0]
