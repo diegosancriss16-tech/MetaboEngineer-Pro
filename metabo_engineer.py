@@ -3,14 +3,13 @@
 MetaboEngineer Pro
 Suite integral de ingenieria metabolica y biologia sintetica.
 
-v0.2.2 — Correcciones:
-  [FIX-1] Guardián de solver: si Gurobi falla por licencia limitada, se 
-          cambia automáticamente a GLPK antes de empezar el GA.
-  [FIX-2] Guard anti-basura: si todas las evaluaciones del GA fallan 
-          (fitness = -1e6), se lanza un error explícito en lugar de 
-          reportar un falso éxito.
-  [FIX-3] _evolucionar acepta un parámetro `semillas` para inyectar
-          individuos conocidos y facilitar el cruce del valle de aptitud.
+v0.2.3 — Correcciones basadas en auditoría científica:
+  [FIX-1] Bug de O2: configurar_ambiente ahora reabre el oxígeno en aerobio.
+  [FIX-2] Retención real: analisis_profundo calcula FVA-min@90% (no max) 
+          para medir el colapso tipo knife-edge de genes como atpE.
+  [FIX-3] Caché robusta: el hash del archivo incluye los límites del medio,
+          invalidando la caché si se cambia la fuente de carbono.
+  [FIX-4] Semillas: _evolucionar acepta inyección de individuos conocidos.
 """
 
 import warnings
@@ -41,7 +40,7 @@ from rich.panel import Panel
 
 console = Console()
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 MODULOS_EXTERNOS_DISPONIBLES = False
 try:
@@ -88,12 +87,8 @@ def preguntar_seed():
         return random.randint(0, 999999)
 
 
-# 🛠️ FIX 1: Guardián de solver
 def _asegurar_solver_funcional(modelo):
-    """Prueba el solver activo con un FBA del WT; si falla (licencia
-    restringida de Gurobi con modelos grandes, solver ausente), cae a GLPK."""
     try:
-        # Evaluate growth to test the solver
         valor = modelo.slim_optimize()
         if valor is None or pd.isna(valor):
             raise RuntimeError("La optimizacion devolvio un valor no numerico (posible fallo de licencia).")
@@ -103,7 +98,6 @@ def _asegurar_solver_funcional(modelo):
         console.print("[yellow]WARN[/yellow] Cambiando automáticamente a GLPK...")
         try:
             modelo.solver = "glpk"
-            # Verify GLPK works
             valor = modelo.slim_optimize()
             if valor is None or pd.isna(valor):
                  raise RuntimeError("GLPK tambien fallo silenciosamente.")
@@ -113,6 +107,7 @@ def _asegurar_solver_funcional(modelo):
     return modelo
 
 
+# 🛠️ FIX 1: Reabrir O2 en aerobio
 def configurar_ambiente(modelo, ambiente):
     ambiente_limpio = str(ambiente).lower().strip()
     if ambiente_limpio not in ['aerobio', 'anaerobio']:
@@ -122,6 +117,8 @@ def configurar_ambiente(modelo, ambiente):
     if 'EX_o2_e' in modelo_amb.reactions:
         if ambiente_limpio == 'anaerobio':
             modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 0.0)  # Bloqueo total O2
+        else:
+            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0) # REABRE O2
     else:
         if ambiente_limpio == 'anaerobio':
             console.print("[yellow]WARN[/yellow] El modelo no tiene EX_o2_e.")
@@ -131,7 +128,6 @@ def configurar_ambiente(modelo, ambiente):
             if rxn in modelo_amb.reactions:
                 modelo_amb.reactions.get_by_id(rxn).bounds = (0.0, 0.0)
 
-    # 🛠️ FIX 1 aplicado aquí
     modelo_amb = _asegurar_solver_funcional(modelo_amb)
     return modelo_amb
 
@@ -313,29 +309,34 @@ def inyectar_ruta_heterologa(modelo, quimico):
     return None, None
 
 
+# 🛠️ FIX 3: Hash del medio para invalidar caché
 def obtener_genes_no_esenciales(modelo, gen_biomasa):
     modelo_id = getattr(modelo, 'id', 'modelo_desconocido')
     if not modelo_id:
         modelo_id = "iML1515" if len(modelo.reactions) > 2000 else f"modelo_{len(modelo.reactions)}rxns"
 
     ambiente = _detectar_ambiente_modelo(modelo)
+    
+    # Generar hash de los límites de todos los intercambios para evitar caché obsoleta
+    bounds_str = "".join([f"{r.id}_{r.bounds}" for r in modelo.exchanges])
+    bounds_hash = hashlib.md5(bounds_str.encode()).hexdigest()[:8]
 
     cache_dir = Path("benchmark/results")
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_file = cache_dir / f"essential_cache_{modelo_id}_{gen_biomasa}_{ambiente}.json"
+    cache_file = cache_dir / f"essential_cache_{modelo_id}_{gen_biomasa}_{ambiente}_{bounds_hash}.json"
 
     if cache_file.exists():
-        console.print(f"[cyan]CACHÉ[/cyan] Cargando genes esenciales desde {cache_file} (ambiente: {ambiente})...")
+        console.print(f"[cyan]CACHÉ[/cyan] Cargando genes esenciales desde {cache_file.name}...")
         try:
             with open(cache_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             console.print(f"[yellow]WARN[/yellow] Error leyendo caché: {e}. Recalculando...")
 
-    console.print(f"[cyan]INFO[/cyan] Calculando filtro de esencialidad en ambiente {ambiente} (esto puede tardar unos minutos la primera vez)...")
+    console.print(f"[cyan]INFO[/cyan] Calculando filtro de esencialidad (esto puede tardar unos minutos)...")
 
     modelo_wt = modelo.copy()
-    modelo_wt.solver = 'glpk'  # Forzamos GLPK para el filtro de esencialidad
+    modelo_wt.solver = 'glpk'
     modelo_wt.objective = gen_biomasa
 
     sol_wt = modelo_wt.slim_optimize()
@@ -361,7 +362,7 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     try:
         with open(cache_file, "w", encoding="utf-8") as f:
             json.dump(no_esenciales, f)
-        console.print(f"[green]OK[/green] Caché guardado en {cache_file} ({len(no_esenciales)} genes no esenciales).")
+        console.print(f"[green]OK[/green] Caché guardado en {cache_file.name} ({len(no_esenciales)} genes no esenciales).")
     except Exception as e:
         console.print(f"[yellow]WARN[/yellow] No se pudo guardar el caché: {e}")
 
@@ -412,16 +413,13 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _ca
     return resultado
 
 
-# 🛠️ FIX 3: Inyección de semillas en el GA
 def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_split=3, descripcion="Evolucionando...", semillas=None):
     poblacion = []
     
-    # NUEVO: Inyectar semillas si existen
     if semillas:
         for s in semillas[:pop_size]:
             poblacion.append({"genes": list(s), "fitness": fitness_fn(s)})
             
-    # Llenar el resto con individuos aleatorios
     while len(poblacion) < pop_size:
         gm = random.sample(pool_genes, min(k, len(pool_genes)))
         poblacion.append({"genes": gm, "fitness": fitness_fn(gm)})
@@ -485,6 +483,7 @@ def mostrar_cinetica_local(modelo, quimico, genes_knockout):
     if encontrados > 0: console.print(tabla)
 
 
+# 🛠️ FIX 2: Retención real (FVA-min@90% vs FVA-min@100%)
 def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
@@ -500,17 +499,28 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
         if sol_bio.status == 'optimal':
             max_bio = sol_bio.objective_value
             
+            # 1. FVA-min @ 100% (Garantizado)
             modelo_mut.reactions.get_by_id(gen_biomasa).lower_bound = max_bio * 1.0
             modelo_mut.objective = quimico
             modelo_mut.objective.direction = 'min'
-            sol_garantizado = modelo_mut.optimize()
-            prod_garantizada = max(0.0, sol_garantizado.objective_value) if sol_garantizado.status == 'optimal' else 0.0
+            sol_g100 = modelo_mut.optimize()
+            prod_g100 = max(0.0, sol_g100.objective_value) if sol_g100.status == 'optimal' else 0.0
 
+            # 2. FVA-min @ 90% (Garantizado a 90%, para medir retención real)
             modelo_mut.reactions.get_by_id(gen_biomasa).lower_bound = max_bio * 0.9
             modelo_mut.objective = quimico
+            modelo_mut.objective.direction = 'min'
+            sol_g90 = modelo_mut.optimize()
+            prod_g90 = max(0.0, sol_g90.objective_value) if sol_g90.status == 'optimal' else 0.0
+
+            # 3. FVA-max @ 90% (Cota superior optimista)
+            modelo_mut.objective = quimico
             modelo_mut.objective.direction = 'max'
-            sol_max = modelo_mut.optimize()
-            prod_max_90 = max(0.0, sol_max.objective_value) if sol_max.status == 'optimal' else 0.0
+            sol_m90 = modelo_mut.optimize()
+            prod_m90 = max(0.0, sol_m90.objective_value) if sol_m90.status == 'optimal' else 0.0
+
+            # Cálculo de retención (Knife-edge)
+            retencion = (prod_g90 / prod_g100 * 100) if prod_g100 > 0 else 0.0
 
             try:
                 glc_uptake = abs(modelo.reactions.get_by_id("EX_glc__D_e").lower_bound)
@@ -518,15 +528,16 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
             except:
                 glc_uptake = 10.0
                 
-            rendimiento_mol_mol = prod_garantizada / glc_uptake
+            rendimiento_mol_mol = prod_g100 / glc_uptake
 
-            console.print(f"   -> Fitness (Garantizado @100%): [bold cyan]{prod_garantizada:.4f}[/bold cyan] mmol/gDW/h")
+            console.print(f"   -> Fitness (Garantizado @100%): [bold cyan]{prod_g100:.4f}[/bold cyan] mmol/gDW/h")
             console.print(f"   -> Rendimiento (Garantizado): [bold green]{rendimiento_mol_mol:.3f}[/bold green] mol/mol")
             console.print(f"   [dim](Calculado sobre una captación de glucosa de {glc_uptake} mmol/gDW/h)[/dim]")
-            console.print(f"   -> Cota Superior (@90% crecimiento): [bold yellow]{prod_max_90:.4f}[/bold yellow] mmol/gDW/h")
+            console.print(f"   -> Retención @90%: [bold magenta]{retencion:.1f}%[/bold magenta] (Min@90%: {prod_g90:.4f})")
+            console.print(f"   -> Cota Superior (@90% max): [bold yellow]{prod_m90:.4f}[/bold yellow] mmol/gDW/h")
             
-            if sol_max.status == 'optimal':
-                carga = sol_max.fluxes.abs().sum()
+            if sol_m90.status == 'optimal':
+                carga = sol_m90.fluxes.abs().sum()
                 console.print(f"   -> Carga Metabolica (Max@90%): [bold magenta]{carga:.2f}[/bold magenta]")
                 
             analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
@@ -552,7 +563,6 @@ def mostrar_historial():
     console.print(df.tail(10).to_string())
 
 
-# 🛠️ FIX 2: Guard anti-basura en los métodos
 def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
     if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
@@ -571,11 +581,9 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
         crossover_split=3,
     )
 
-    # 🛠️ FIX 2: Guard anti-basura
     if mejor["fitness"] <= -1e5:
         console.print("\n[red]ERROR[/red] TODAS las evaluaciones fallaron (fitness = -1e6).")
-        console.print("       Este resultado NO es interpretable. Causa tipica: el solver no pudo")
-        console.print("       optimizar el modelo (licencia de Gurobi limitada). Corrige el solver y re-corre.")
+        console.print("       Este resultado NO es interpretable. Corrige el solver y re-corre.")
         return mejor
 
     console.print(f"\n[green]OK[/green] Diseno completado. Fitness (FVA-min@100%): {mejor['fitness']:.4f}\n")
@@ -635,10 +643,8 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
 
     mejor = _evolucionar(genes_candidatos, max_mutaciones, generaciones, pop_size, evaluar, crossover_split=2)
 
-    # 🛠️ FIX 2: Guard anti-basura
     if mejor["fitness"] <= -1e5:
-        console.print("\n[red]ERROR[/red] TODAS las evaluaciones fallaron (fitness = -1e6).")
-        console.print("       Este resultado NO es interpretable. Corrige el solver y re-corre.")
+        console.print("\n[red]ERROR[/red] TODAS las evaluaciones fallaron.")
         return mejor
 
     if mejor["fitness"] > 0:
@@ -719,10 +725,8 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
         crossover_split=3,
     )
 
-    # 🛠️ FIX 2: Guard anti-basura
     if mejor["fitness"] <= -1e5:
-        console.print("\n[red]ERROR[/red] TODAS las evaluaciones fallaron (fitness = -1e6).")
-        console.print("       Este resultado NO es interpretable. Corrige el solver y re-corre.")
+        console.print("\n[red]ERROR[/red] TODAS las evaluaciones fallaron.")
         return mejor
 
     console.print(f"[green]OK[/green] Mejor Cepa: {', '.join(mejor['genes'])} (Fitness FVA-min@100%: {mejor['fitness']:.4f})")

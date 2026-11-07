@@ -116,7 +116,9 @@ El GA puro (sin intervención) converge a la ATP sintasa, demostrando la barrera
 | **42** | **Seeding** | **KJ060 (4 genes) + 9 optimizados** | **10.8056** |
 | **100** | **Seeding** | **KJ060 (13 genes) + 0 optimizados** | **10.1242** |
 
-**El Tercer Acto:** El GA sembrado descubrió un diseño híbrido que combina la estrategia redox (`ldhA`, `adhE`) con la estrategia energética (`atpE`), alcanzando un fitness de **10.80** (un 38% superior al récord experimental histórico de Jantama, 7.79).
+**El Tercer Acto:** El GA sembrado descubrió un diseño híbrido que combina la estrategia redox (`ldhA`, `adhE`) con la estrategia energética (`atpE`), alcanzando un fitness **in silico** de **10.80 mmol/gDW/h** (~1.08 mol/mol). 
+
+*Nota de rigor:* Los 10.80 superan el techo computacional *in silico* del diseño KJ060 extendido (7.79 mmol/gDW/h), demostrando la utilidad del GA para encontrar sinergias ocultas. Sin embargo, **no superan el récord experimental real de Jantama en biorreactor (1.2–1.6 mol/mol, que equivalen a ~12–16 mmol/gDW/h)**. El GA optimizó el modelo, pero la brecha hacia la realidad fisiológica sigue siendo territorio del laboratorio.
 
 ---
 
