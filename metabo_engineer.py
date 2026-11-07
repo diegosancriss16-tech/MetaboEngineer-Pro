@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-MetaboEngineer Pro v0.2.7
-[FIX-1] Umbral de candidatos restaurado a 0.1 en optknock_exacto para evitar explosión combinatoria.
-[FIX-2] Llamada a mostrar_cinetica_local comentada en analisis_profundo (consistencia con README).
-[FIX-3] Termodinámica ordena por flujo absoluto (top 10).
-[FIX-4] _evolucionar lanza ValueError si ninguna semilla es válida.
+MetaboEngineer Pro v0.2.8
+[FIX-1] Hash del caché ahora incluye umbral de letalidad y versión del código.
+[FIX-2] Generador aleatorio (RNG) aislado para evitar interferencia con optlang.
+[FIX-3] Renombrado optknock_exacto (ya no dice MILP).
+[FIX-4] Termodinámica evalúa el sentido del flujo (viable si dg * flujo < 0).
 """
 
 import warnings
@@ -35,7 +35,7 @@ from organismos import get_organism_id  # noqa: F401  (re-exportada: usada por e
 
 console = Console()
 
-__version__ = "0.2.7"
+__version__ = "0.2.8"
 
 # Umbrales unificados
 UMBRAL_LETALIDAD_RELATIVA = 0.05
@@ -313,7 +313,10 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
         modelo_id = "iML1515" if len(modelo.reactions) > 2000 else f"modelo_{len(modelo.reactions)}rxns"
 
     ambiente = _detectar_ambiente_modelo(modelo)
+    
+    # FIX 1: Añadimos el umbral y la versión al hash del caché
     bounds_str = "".join([f"{r.id}_{r.bounds}" for r in modelo.exchanges])
+    bounds_str += f"_{UMBRAL_LETALIDAD_RELATIVA}_{__version__}"
     bounds_hash = hashlib.md5(bounds_str.encode()).hexdigest()[:8]
 
     cache_dir = Path("benchmark/results")
@@ -435,16 +438,12 @@ def evaluar_acoplamiento_fva(modelo_base, genes_apagados, quimico, gen_biomasa, 
 
 def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_split=3, descripcion="Evolucionando...", semillas=None, rng=None):
     """Algoritmo genetico de k knockouts.
-
-    Reproducibilidad: el azar sale de un generador PRIVADO. Por defecto se siembra con un unico
-    numero tomado del `random` global al empezar, asi que `random.seed(s)` antes de llamar sigue
-    funcionando. Despues de eso nadie mas puede alterar la secuencia: optlang crea cada modelo con
-    uuid.uuid1(), que en Python <= 3.12 consume el `random` global y hacia que la misma semilla
-    diera trayectorias distintas segun la version de Python (y segun cuantas evaluaciones
-    estuvieran en cache).
+    
+    FIX 2: El azar sale de un generador PRIVADO. Si no se pasa `rng`, se crea uno nuevo.
     """
     if rng is None:
         rng = random.Random(random.getrandbits(64))
+        
     poblacion = []
     
     if semillas:
@@ -493,13 +492,14 @@ def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_sp
     return max(poblacion, key=lambda x: x["fitness"])
 
 
+# FIX 4: Termodinámica evalúa el sentido del flujo
 def analizar_termodinamica_cepa(modelo, solucion, quimico):
     if not MODULOS_EXTERNOS_DISPONIBLES: return
     flujos = [(r, abs(v)) for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
     flujos.sort(key=lambda x: x[1], reverse=True)
     reacciones = [quimico] + [r for r, v in flujos[:10]]
     try: 
-        analizar_termodinamica_universal(modelo, reacciones)
+        analizar_termodinamica_universal(modelo, reacciones, fluxes=solucion.fluxes)
     except Exception as e:
         console.print(f"[dim]WARN: Termodinamica fallo: {e}[/dim]")
 
@@ -604,7 +604,7 @@ def mostrar_historial():
 
 
 def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
-    if seed is not None: random.seed(seed)
+    rng = random.Random(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
     if quimico not in modelo.reactions: return
 
@@ -619,6 +619,7 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
         todos_los_genes, mutaciones, gens, pop_size,
         lambda g: evaluar_bacteria(modelo, g, quimico, gen_biomasa, _cache=_cache_eval),
         crossover_split=3,
+        rng=rng,
     )
 
     if mejor["fitness"] <= -1e5:
@@ -651,7 +652,7 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
 
 
 def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
-    if seed is not None: random.seed(seed)
+    rng = random.Random(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
     if quimico not in modelo.reactions: return
 
@@ -667,6 +668,7 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
         genes_candidatos, max_mutaciones, generaciones, pop_size,
         lambda g: evaluar_acoplamiento_fva(modelo, g, quimico, gen_biomasa, _cache=_cache_eval),
         crossover_split=2,
+        rng=rng,
     )
 
     if mejor["fitness"] <= -1e5:
@@ -687,7 +689,6 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
 
 def optknock_exacto(modelo, nombre_organismo, modelo_id, seed=None):
     """Enumeracion exhaustiva de combinaciones de k genes (no es un MILP)."""
-    if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
     if quimico not in modelo.reactions: return
 
@@ -698,7 +699,6 @@ def optknock_exacto(modelo, nombre_organismo, modelo_id, seed=None):
     console.print("\n[cyan]INFO[/cyan] Buscando el óptimo exacto (enumeración exhaustiva)...")
     sol_wt = modelo.optimize()
     
-    # FIX: Se restaura el umbral 0.1 para evitar explosión combinatoria
     reacciones_activas = [r for r, v in sol_wt.fluxes.items() if abs(v) > 0.1 and not r.startswith("EX_")]
     genes_activos = sorted(list({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes}))
 
@@ -728,7 +728,7 @@ def optknock_exacto(modelo, nombre_organismo, modelo_id, seed=None):
                 logging.warning(f"FVA falló en optknock_exacto para {combo}: {e}")
 
     if mejor_combo:
-        console.print("\n[bold green]¡OptKnock Exacto Exitoso![/bold green]")
+        console.print("\n[bold green]¡Enumeración Exhaustiva Exitosa![/bold green]")
         console.print(f"Genes: {', '.join(mejor_combo)}")
         console.print(f"Ratio Real: {mejor_ratio:.4f}")
         try: _exportar_resultado_json(modelo_id, quimico, "optknock_exacto", mejor_combo, mejor_ratio, seed)
@@ -744,7 +744,7 @@ optknock_exacto_milp = optknock_exacto
 
 
 def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
-    if seed is not None: random.seed(seed)
+    rng = random.Random(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e")
     if quimico not in modelo.reactions: return
 
@@ -759,6 +759,7 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
         todos_los_genes, mutaciones, gens, pop_size,
         lambda g: evaluar_bacteria(modelo, g, quimico, gen_biomasa, _cache=_cache_eval),
         crossover_split=3,
+        rng=rng,
     )
 
     if mejor["fitness"] <= -1e5:
@@ -830,7 +831,7 @@ def main():
 
     while True:
         console.print(f"\n[bold]--- MENU (v{__version__}) ---[/bold]")
-        console.print("1. FBA | 2. IA | 3. OptKnock (GA) | 4. Integral | 5. Historial | 6. Limpiar Cache | 7. Inyectar Cafeína | 8. OptKnock Exacto | 9. Salir")
+        console.print("1. FBA | 2. IA | 3. OptKnock (GA) | 4. Integral | 5. Historial | 6. Limpiar Cache | 7. Inyectar Cafeína | 8. Enumeración Exhaustiva (k≤2) | 9. Salir")
         try:
             op = Prompt.ask("\nSelecciona una opcion", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"])
         except (EOFError, KeyboardInterrupt): break
