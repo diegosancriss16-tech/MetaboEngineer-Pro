@@ -68,7 +68,6 @@ def preguntar_seed():
     except:
         return random.randint(0, 999999)
 
-# 🛠️ FIX 2: Validación estricta del ambiente (Evita silencios por typos)
 def configurar_ambiente(modelo, ambiente):
     ambiente_limpio = str(ambiente).lower().strip()
     if ambiente_limpio not in ['aerobio', 'anaerobio']:
@@ -171,7 +170,7 @@ def _sincronizar_indice():
                 _registrar_modelo(read_sbml_model(os.path.join("modelos", archivo)), archivo[:-4], os.path.join("modelos", archivo), "manual")
             except: pass
 
-# 🛠️ FIX 3: Degradación graciosa si falla la red o el modelo no existe
+# 🛠️ FIX 2: Lógica robusta para encontrar archivos locales o limpiar el string para BiGG
 def cargar_modelo_universal(modelo_id):
     if not modelo_id or not str(modelo_id).strip(): raise Exception("ID de modelo vacio.")
     modelo_id = str(modelo_id).strip()
@@ -183,27 +182,35 @@ def cargar_modelo_universal(modelo_id):
         except Exception as e:
             raise ValueError(f"No se pudo cargar '{modelo_id}' desde bundle COBRApy: {e}")
 
-    ruta_cwd = f"{modelo_id}.xml"
-    if os.path.exists(ruta_cwd):
-        modelo = read_sbml_model(ruta_cwd)
-        return modelo, f"Modelo '{modelo_id}' cargado desde {ruta_cwd} (CI)."
+    # Limpiamos el .xml para tener el nombre base real
+    nombre_base = modelo_id[:-4] if modelo_id.endswith(".xml") else modelo_id
 
+    # 1. Buscar en el directorio actual (CWD) tal cual o con .xml
+    for nombre_archivo in [modelo_id, f"{nombre_base}.xml"]:
+        if os.path.exists(nombre_archivo):
+            modelo = read_sbml_model(nombre_archivo)
+            return modelo, f"Modelo '{nombre_base}' cargado desde {nombre_archivo} (CI)."
+
+    # 2. Buscar en la carpeta local 'modelos/'
     if not os.path.exists("modelos"): os.makedirs("modelos")
-    ruta_local = f"modelos/{modelo_id}.xml"
-    if os.path.exists(ruta_local):
-        modelo = read_sbml_model(ruta_local)
-        _registrar_modelo(modelo, modelo_id, ruta_local, "local")
-        return modelo, f"Modelo '{modelo_id}' cargado desde disco local."
+    for nombre_archivo in [modelo_id, f"{nombre_base}.xml"]:
+        ruta_local = f"modelos/{nombre_archivo}"
+        if os.path.exists(ruta_local):
+            modelo = read_sbml_model(ruta_local)
+            _registrar_modelo(modelo, nombre_base, ruta_local, "local")
+            return modelo, f"Modelo '{nombre_base}' cargado desde disco local."
 
+    # 3. Descargar desde BiGG (usando el nombre_base sin .xml)
     try:
-        modelo = load_model(modelo_id)
+        modelo = load_model(nombre_base)
         try:
+            ruta_local = f"modelos/{nombre_base}.xml"
             write_sbml_model(modelo, ruta_local)
-            _registrar_modelo(modelo, modelo_id, ruta_local, "cobrapy")
+            _registrar_modelo(modelo, nombre_base, ruta_local, "cobrapy")
         except: pass
-        return modelo, f"Modelo '{modelo_id}' descargado via cobrapy."
+        return modelo, f"Modelo '{nombre_base}' descargado via cobrapy."
     except Exception as e:
-        raise ValueError(f"No se pudo cargar el modelo '{modelo_id}' desde BiGG. Verifica tu conexión o descarga el XML manualmente. Error original: {e}")
+        raise ValueError(f"No se pudo cargar el modelo '{nombre_base}' desde BiGG. Verifica tu conexión o descarga el XML manualmente. Error original: {e}")
 
 def inyectar_ruta_heterologa(modelo, quimico):
     if quimico == "EX_caft_e":
@@ -237,10 +244,12 @@ def inyectar_ruta_heterologa(modelo, quimico):
         return modelo, "EX_caft_e"
     return None, None
 
+# 🛠️ FIX 1: Forzar solver GLPK en las copias para evitar crashes de Gurobi
 def obtener_genes_no_esenciales(modelo, gen_biomasa):
     console.print("[cyan]INFO[/cyan] Filtrando genes esenciales...")
     genes_no_esenciales = []
     modelo_wt = modelo.copy()
+    modelo_wt.solver = 'glpk' # FIX: Evita el crash de Gurobi
     modelo_wt.objective = gen_biomasa
     sol_wt = modelo_wt.optimize()
     crecimiento_wt = sol_wt.objective_value if sol_wt.status == 'optimal' else 0.0
@@ -252,6 +261,7 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
             continue
 
         m = modelo.copy()
+        m.solver = 'glpk' # FIX: Evita el crash de Gurobi en la copia interna
         with m:
             knock_out_model_genes(m, [gen.id])
             m.objective = gen_biomasa
@@ -262,9 +272,7 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     console.print(f"[green]OK[/green] Se descartaron {len(modelo.genes) - len(genes_no_esenciales)} genes letales.")
     return genes_no_esenciales
 
-# 🛠️ FIX 1: Validación estricta de argumentos (Elimina los silencios S1)
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
-    # --- VALIDACIÓN PREVIA (S3: Rechazo limpio) ---
     if not genes_apagados:
         raise ValueError("La lista de genes a apagar está vacía. El GA necesita al menos un gen.")
     
@@ -278,7 +286,6 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
         if gen_id not in modelo_base.genes:
             raise ValueError(f"El gen '{gen_id}' no existe en el modelo.")
 
-    # --- CÁLCULO (Solo si todo es válido) ---
     modelo = modelo_base.copy()
     for gen_id in genes_apagados:
         modelo.genes.get_by_id(gen_id).knock_out()
@@ -288,7 +295,7 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
         sol_biomasa = modelo.optimize()
         
         if sol_biomasa.status != 'optimal' or sol_biomasa.objective_value < 0.05:
-            return -1e6  # Knockout letal (esto sí es un resultado biológico, no un error)
+            return -1e6
             
         max_biomasa_mut = sol_biomasa.objective_value
         modelo.reactions.get_by_id(gen_biomasa).lower_bound = max_biomasa_mut * 1.0
@@ -347,21 +354,18 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
         if sol_bio.status == 'optimal':
             max_bio = sol_bio.objective_value
             
-            # 1. Mínimo Garantizado al 100% (FVA-min, lo que ve el GA)
             modelo_mut.reactions.get_by_id(gen_biomasa).lower_bound = max_bio * 1.0
             modelo_mut.objective = quimico
             modelo_mut.objective.direction = 'min'
             sol_garantizado = modelo_mut.optimize()
             prod_garantizada = max(0.0, sol_garantizado.objective_value) if sol_garantizado.status == 'optimal' else 0.0
 
-            # 2. Máximo Optimista al 90% (FBA max, el techo teórico)
             modelo_mut.reactions.get_by_id(gen_biomasa).lower_bound = max_bio * 0.9
             modelo_mut.objective = quimico
             modelo_mut.objective.direction = 'max'
             sol_max = modelo_mut.optimize()
             prod_max_90 = max(0.0, sol_max.objective_value) if sol_max.status == 'optimal' else 0.0
 
-            # 3. Cálculo dinámico de rendimiento sobre el mínimo garantizado
             try:
                 glc_uptake = abs(modelo.reactions.get_by_id("EX_glc__D_e").lower_bound)
                 if glc_uptake == 0: glc_uptake = 10.0
