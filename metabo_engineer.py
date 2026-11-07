@@ -5,7 +5,7 @@ MetaboEngineer Pro v0.2.8
 [FIX-2] Generador aleatorio (RNG) aislado para evitar interferencia con optlang.
 [FIX-3] Renombrado optknock_exacto (ya no dice MILP).
 [FIX-4] Termodinámica evalúa el sentido del flujo (viable si dg * flujo < 0).
-[FIX-5] Eliminado alias optknock_exacto_milp y textos "exacto" en consola.
+[FIX-5] Alias optknock_exacto_milp restaurado (compatibilidad) y textos honestos.
 """
 
 import warnings
@@ -663,7 +663,7 @@ def optknock_exacto(modelo, nombre_organismo, modelo_id, seed=None):
     gen_biomasa = _detectar_gen_biomasa(modelo)
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
 
-    console.print("\n[cyan]INFO[/cyan] Buscando el óptimo global (enumeración exhaustiva)...")
+    console.print("\n[cyan]INFO[/cyan] Evaluando combinaciones entre los candidatos activos...")
     sol_wt = modelo.optimize()
     
     reacciones_activas = [r for r, v in sol_wt.fluxes.items() if abs(v) > 0.1 and not r.startswith("EX_")]
@@ -695,7 +695,7 @@ def optknock_exacto(modelo, nombre_organismo, modelo_id, seed=None):
                 logging.warning(f"FVA falló en optknock_exacto para {combo}: {e}")
 
     if mejor_combo:
-        console.print("\n[bold green]¡Enumeración Exhaustiva Exitosa![/bold green]")
+        console.print("\n[bold green]Mejor combinación encontrada (enumeración de candidatos)[/bold green]")
         console.print(f"Genes: {', '.join(mejor_combo)}")
         console.print(f"Ratio Real: {mejor_ratio:.4f}")
         try: _exportar_resultado_json(modelo_id, quimico, "optknock_exacto", mejor_combo, mejor_ratio, seed)
@@ -703,11 +703,12 @@ def optknock_exacto(modelo, nombre_organismo, modelo_id, seed=None):
             logging.warning(f"No se pudo exportar el resultado JSON: {e}")
         analisis_profundo(modelo, gen_biomasa, mejor_combo, quimico)
     else:
-        console.print("[red]No se encontró acoplamiento óptimo.[/red]")
+        console.print("[red]No se encontró acoplamiento.[/red]")
 
 
 # Alias retrocompatible para scripts antiguos
 optknock_exacto_milp = optknock_exacto
+
 
 def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
     rng = random.Random(seed)
