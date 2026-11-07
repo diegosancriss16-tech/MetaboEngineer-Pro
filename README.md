@@ -22,7 +22,7 @@
 - [Metodología Híbrida y Acoplamiento](#-metodología-híbrida-y-acoplamiento)
 - [Validación Biológica y Universalidad](#-validación-biológica-y-universalidad)
 - [Robustez Adversaria y Seguridad de Datos](#-robustez-adversaria-y-seguridad-de-datos)
-- [Resultados del GA (Epistasis, Seeding y Estocasticidad)](#-resultados-del-ga-epistasis-seeding-y-estocasticidad)
+- [Resultados del GA (Epistasis, Seeding y Destilación)](#-resultados-del-ga-epistasis-seeding-y-destilación)
 - [Validación Experimental (Cepa KJ060)](#-validación-experimental-cepa-kj060)
 - [Instalación](#-instalación)
 - [Uso rápido y Pipeline de Diseño](#-uso-rápido-y-pipeline-de-diseño)
@@ -43,7 +43,7 @@
 | **Ambientes Controlados** | Simulación estricta de condiciones **aerobias** (bloqueo de fermentación) o **anaerobias** (bloqueo de O2). |
 | **Pipeline de Diseño** | Script automatizado de 5 etapas (Explorar -> Destilar -> Verificar -> Documentar) listo para laboratorio. |
 | **Termodinámica** | ΔG' de reacciones vía eQuilibrator. |
-| **Reporte científico** | Generación automática de reporte `.md` con UniProt + Rhea + cinética + cálculo dinámico mol/mol. |
+| **Reporte científico** | Generación automática de reporte `.md` con UniProt + Rhea + cálculo dinámico mol/mol. |
 | **Universal** | *E. coli*, *B. subtilis*, *P. putida*, *S. cerevisiae* y cualquier modelo SBML. |
 
 ---
@@ -93,7 +93,7 @@ Como herramienta científica, el software debe fallar de forma segura ante entra
 
 ---
 
-## 🧬 Resultados del GA (Epistasis, Seeding y Estocasticidad)
+## 🧬 Resultados del GA (Epistasis, Seeding y Destilación)
 
 ### k=5 (presupuesto ampliado, 2 semillas)
 | Semilla | Genes KO | Fitness |
@@ -106,17 +106,22 @@ Como herramienta científica, el software debe fallar de forma segura ante entra
 - **`nrdD` (ribonucleótido reductasa anaerobia)**: contribuidor epistático real (+0.0050).
 - Los otros 3 genes son pasajeros silenciosos.
 
-### k=13 (GA puro vs. GA Sembrado)
-El GA puro (sin intervención) converge a la ATP sintasa, demostrando la barrera del **Valle de Aptitud**. Al inyectar los "escalones" del valle (familias de isoenzimas de KJ060) en la población inicial, el GA **rompió la barrera**.
+### k=13 (GA puro vs. GA Sembrado + Destilado)
+El GA puro (sin intervención) converge a la ATP sintasa, demostrando la barrera del **Valle de Aptitud**. Al inyectar los "escalones" del valle (familias de isoenzimas de Jantama) en la población inicial, el GA **rompió la barrera**.
 
 | Semilla | Método | Genes KO | Fitness |
 |---|---|---|---|
 | 42 | GA Puro | atpB + ydiO + 11 pasajeros | 1.6444 |
 | 100 | GA Puro | atpB + 12 pasajeros | 1.5562 |
-| **42** | **Seeding** | **KJ060 (4 genes) + 9 optimizados** | **10.8056** |
-| **100** | **Seeding** | **KJ060 (11 genes válidos) + 0 optimizados** | **10.1242** |
+| 42 | Seeding | KJ060 (4 genes) + 9 optimizados | 10.8056 |
+| 100 | Seeding | KJ060 (11 genes válidos) + 0 optimizados | 10.1242 |
+| **100** | **Seeding + Destilado (LOO)** | **11 genes destilados (sin atpE, sin ackA)** | **11.1867** |
 
-**El Tercer Acto:** El GA sembrado descubrió un diseño híbrido de 11 genes que combina la estrategia redox con la estrategia energética, alcanzando un fitness **in silico** de **10.1242 mmol/gDW/h**. Este valor supera el techo *in silico* de KJ060 (7.7988), pero **no supera las mediciones experimentales reales (1.2–1.6 mol/mol)**. El diseño tiene una retención del **79.0%** @90% de crecimiento (casi tan robusto como la cepa experimental del 81.9%).
+**El Tercer Acto:** El GA sembrado descubrió un diseño híbrido inicial de 11 genes que combinaba la estrategia redox con la estrategia energética (fitness in silico de 10.1242). Sin embargo, al aplicar un algoritmo de **destilación (Leave-One-Out)** — eliminando genes pasajeros como `atpE` y explorando redundancias de isoenzimas como `ackA` — el fitness real escaló a **11.1867 mmol/gDW/h** (~1.12 mol/mol). Este diseño destilado retiene un **77.6%** de su producción al 90% de crecimiento, demostrando una robustez comparable al 81.9% de la cepa experimental de Jantama.
+
+*Nota de rigor:* El diseño destilado supera el techo computacional *in silico* de KJ060 (7.7988), pero **no supera las mediciones experimentales reales en biorreactor (1.2–1.6 mol/mol, equivalentes a ~12–16 mmol/gDW/h)**.
+
+*(Genes del diseño destilado: `b1380`, `b1241`, `b1478`, `b4287`, `b3738`, `b3583`, `b0905`, `b1622`, `b4086`, `b0355`, `b4195`)*
 
 ---
 
@@ -128,8 +133,8 @@ La cepa KJ060 (Jantama et al. 2008; 5 KOs) **no es reproducible como deleciones 
 |---|---|---|---|---|
 | WT | 0 | 0.0526 | — | — |
 | atpB (óptimo in silico k=1) | 1 | 1.5562 | 0.0337 | 2.2% ❌ |
-| **KJ060 extendido (experimental)** | **13** | **7.7988** | **6.3910** | **81.9% ✅** |
-| **GA Sembrado (in silico v0.2.0)** | **11** | **10.1242** | **7.9986** | **79.0% ✅** |
+| KJ060 extendido (in silico) | 13 | 7.7988 | 6.3910 | 81.9% |
+| **GA Sembrado + Destilado (in silico)** | **11** | **11.1867** | **8.6846** | **77.6%** ✅ |
 
 **El Valle de Aptitud:** Los primeros 7 knockouts de KJ060 empeoran el fitness (0.0394 y 0.0305). El salto de 255× ocurre al bloquear el transporte de formato (7.7872). Esto demuestra que el camino hacia el óptimo requiere cruzar pasos transitoriamente deletéreos (epistasis extrema), lo cual requiere estrategias de *seeding*.
 
@@ -173,19 +178,19 @@ python benchmark/pipeline_design.py --modelo iML1515.xml --target EX_succ_e --am
 # Uso con Seeding manual (para forzar genes conocidos)
 python benchmark/pipeline_design.py --modelo iML1515.xml --target EX_succ_e --ambiente anaerobio --seeding b3738,b0002
 ⚠️ Limitaciones conocidas
-Alcance multiorgánico: La herramienta es operativa y está validada en E. coli (textbook e iML1515). Se ha probado en otros organismos (levadura, B. subtilis, P. putida), pero el GA puede requerir ajustes de parámetros (población/generaciones) para superar los óptimos locales en topologías metabólicas distintas a las de E. coli.
+Alcance multiorgánico: La herramienta está validada en E. coli y es operativa en otros organismos (levadura, B. subtilis, P. putida). Sin embargo, topologías metabólicas distintas pueden requerir ajustes en los parámetros del GA para superar óptimos locales.
 
 BiGG puede fallar: el servidor tiene caídas intermitentes. Usa la descarga manual si es necesario.
 
 OptKnock heurístico: usamos un GA, no bilevel optimization exacto (MILP).
 
-Dependencia del Seeding: El GA puro no cruza el valle de aptitud hacia el óptimo global (converge a la ATP sintasa). Para encontrar el diseño híbrido de 10.12 se requiere la estrategia de siembra (seeding).
+Dependencia del Seeding: El GA puro no cruza el valle de aptitud hacia el óptimo global (converge a la ATP sintasa). Para encontrar el diseño híbrido de 11.18 se requiere la estrategia de siembra (seeding) + destilación.
 
 Cinética ausente: los parámetros kcat/Km no están incluidos por defecto (requieren API de pago de BRENDA) y han sido removidos de los reportes automáticos para evitar confusiones.
 
 eQuilibrator: requiere conexión a internet para descargar compuestos.
 
-Margen de viabilidad fino en el óptimo: el diseño de KJ060 tiene μ=0.0665, solo 1.33× sobre el umbral de viabilidad de la herramienta (0.05).
+Margen de viabilidad fino en el óptimo: el diseño destilado tiene μ=0.0596, solo 1.19× sobre el umbral de viabilidad de la herramienta (0.05).
 
 🗺️ Roadmap (v0.3.0 y más allá)
 ☑ FBA + Algoritmo genético
@@ -205,7 +210,7 @@ Margen de viabilidad fino en el óptimo: el diseño de KJ060 tiene μ=0.0665, so
 ☑ Leave-one-out del diseño epistático (atpF + nrdD)
 ☑ GA con mutación real y reproducibilidad determinista
 ☑ GA con k=13 (puro): No cruzó el valle (convergió a atpB).
-☑ Seeding de población: Rompió el valle y superó el techo in silico de KJ060 (Fitness 10.12 vs 7.79).
+☑ Seeding de población + Destilación LOO: Rompió el valle y encontró el óptimo de 11.18.
 ☑ Suite de Pruebas Adversariales (0 fallos S0/S1).
 ☑ Pipeline de Diseño Asistido (pipeline_design.py).
 □ Leave-family-out del diseño minimal.

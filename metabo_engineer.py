@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-MetaboEngineer Pro v0.2.6
-[FIX-1] Umbrales unificados en optknock (CRECIMIENTO_MIN vs ACTIVO).
-[FIX-2] Termodinámica ordena por flujo absoluto (top 10) en lugar de arbitrario.
-[FIX-3] _evolucionar lanza error si se pasan semillas pero ninguna es válida.
+MetaboEngineer Pro v0.2.7
+[FIX-1] Umbral de candidatos restaurado a 0.1 en optknock_exacto para evitar explosión combinatoria.
+[FIX-2] Llamada a mostrar_cinetica_local comentada en analisis_profundo (consistencia con README).
+[FIX-3] Termodinámica ordena por flujo absoluto (top 10).
+[FIX-4] _evolucionar lanza ValueError si ninguna semilla es válida.
 """
 
 import warnings
@@ -34,7 +35,7 @@ from rich.panel import Panel
 
 console = Console()
 
-__version__ = "0.2.6"
+__version__ = "0.2.7"
 
 # Umbrales unificados
 UMBRAL_LETALIDAD_RELATIVA = 0.05
@@ -397,7 +398,6 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _ca
     return resultado
 
 
-# 🛠️ FIX: _evolucionar lanza error si se pasan semillas pero ninguna es válida
 def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_split=3, descripcion="Evolucionando...", semillas=None):
     poblacion = []
     
@@ -447,7 +447,6 @@ def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_sp
     return max(poblacion, key=lambda x: x["fitness"])
 
 
-# 🛠️ FIX: Termodinámica ordena por flujo absoluto
 def analizar_termodinamica_cepa(modelo, solucion, quimico):
     if not MODULOS_EXTERNOS_DISPONIBLES: return
     flujos = [(r, abs(v)) for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
@@ -532,7 +531,7 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
                 console.print(f"   -> Carga Metabolica (Max@90%): [bold magenta]{carga:.2f}[/bold magenta]")
                 
             analizar_termodinamica_cepa(modelo_mut, sol_g100, quimico)
-            mostrar_cinetica_local(modelo_mut, sol_g100, quimico)
+            # mostrar_cinetica_local(modelo_mut, sol_g100, quimico)  <-- COMENTADO para coincidir con README
     except Exception as e:
         console.print(f"[yellow]WARN[/yellow] Analisis fallo: {e}")
 
@@ -623,7 +622,6 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
         m.objective = gen_biomasa
         sol = m.optimize()
         resultado = 0.0
-        # 🛠️ FIX: Umbral de crecimiento unificado
         if sol.status == 'optimal' and sol.objective_value is not None and sol.objective_value > UMBRAL_CRECIMIENTO_MIN:
             try:
                 fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
@@ -662,7 +660,9 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
 
     console.print("\n[cyan]INFO[/cyan] Buscando el óptimo exacto (enumeración exhaustiva)...")
     sol_wt = modelo.optimize()
-    reacciones_activas = [r for r, v in sol_wt.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
+    
+    # FIX: Se restaura el umbral 0.1 para evitar explosión combinatoria
+    reacciones_activas = [r for r, v in sol_wt.fluxes.items() if abs(v) > 0.1 and not r.startswith("EX_")]
     genes_activos = sorted(list({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes}))
 
     mejor_ratio = -1
@@ -678,7 +678,6 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
         m.objective = gen_biomasa
         sol_bio = m.optimize()
 
-        # 🛠️ FIX: Umbrales unificados
         if sol_bio.status == 'optimal' and sol_bio.objective_value is not None and sol_bio.objective_value > UMBRAL_CRECIMIENTO_MIN:
             try:
                 fva_res = fva(m, [quimico], fraction_of_optimum=1.0)

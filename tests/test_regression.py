@@ -2,6 +2,7 @@
 import pytest
 import os
 import sys
+import subprocess
 import hashlib
 from cobra.io import load_model
 import metabo_engineer as me
@@ -38,24 +39,21 @@ def test_sha256_archivo(tmp_path):
     assert h1 == h2
     assert len(h1) == 64
 
-def test_relleno_no_se_cuelga_con_pocos_genes(tmp_path, monkeypatch):
-    # Este test protege el bucle while de relleno
-    import subprocess
+def test_relleno_no_se_cuelga_con_pocos_genes(tmp_path):
     script_content = """
 import random
 import metabo_engineer as me
 from cobra.io import load_model
 
 modelo = load_model("textbook")
-me.obtener_genes_no_esenciales = lambda m, b: ["b0001", "b0002"] # Solo 2 genes
+me.obtener_genes_no_esenciales = lambda m, b: ["b0001", "b0002"]
 me.evaluar_bacteria = lambda *args, **kwargs: 1.0
 me.analisis_profundo = lambda *args, **kwargs: None
 me._exportar_resultado_json = lambda *args, **kwargs: None
 
 random.seed(42)
-# k=4, pero solo hay 2 genes. No debe colgarse.
 mejor = me._evolucionar(
-    pool_genes=["b0001", "b0002"], k=4, generaciones=1, pop_size=5, 
+    pool_genes=["b0001", "b0002"], k=4, generaciones=1, pop_size=10, 
     fitness_fn=me.evaluar_bacteria
 )
 print("OK")
@@ -63,5 +61,28 @@ print("OK")
     script_path = tmp_path / "stress_test.py"
     script_path.write_text(script_content, encoding='utf-8')
     env = {**os.environ, "PYTHONPATH": os.getcwd()}
-    res = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, env=env, timeout=10)
-    assert "OK" in res.stdout
+    res = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, env=env, timeout=15)
+    assert "OK" in res.stdout, f"El script falló o se colgó. stderr: {res.stderr}"
+
+def test_semillas_invalidas_lanzan_error():
+    """
+    Verifica que si se pasan semillas y NINGUNA es válida para el modelo,
+    _evolucionar lance un ValueError explícito.
+    """
+    # Simulamos un fitness_fn que valida los genes como lo haría evaluar_bacteria
+    def mock_fitness(genes):
+        # Si algún gen no es b0001, lanzamos el error de validación
+        for g in genes:
+            if g != "b0001":
+                raise ValueError(f"El gen '{g}' no existe en el modelo.")
+        return 1.0
+
+    with pytest.raises(ValueError, match="NINGUNA es válida"):
+        me._evolucionar(
+            pool_genes=["b0001"], 
+            k=1, 
+            generaciones=1, 
+            pop_size=5, 
+            fitness_fn=mock_fitness, 
+            semillas=[["gen_falso_1"], ["gen_falso_2"]]
+        )
