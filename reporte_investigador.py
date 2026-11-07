@@ -62,7 +62,8 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
         f.write(f"**Reacciones totales del modelo:** {len(modelo.reactions)}\n\n")
 
         f.write("## 1. Resumen Ejecutivo\n\n")
-        f.write(f"- **Rendimiento ajustado (Fitness):** `{fitness:.4f} mmol/gDW/h`\n")
+        # FIX: Se cambió "Rendimiento ajustado" por "Flujo Garantizado" para reflejar correctamente la unidad (mmol/gDW/h).
+        f.write(f"- **Flujo Garantizado (Fitness):** `{fitness:.4f} mmol/gDW/h`\n")
         f.write(f"- **Genes knock-out:** `{', '.join(mejor_genes)}`\n\n")
 
         f.write("## 2. Validacion Genomica (UniProt & Rhea)\n\n")
@@ -72,40 +73,10 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
             f.write(f"| `{info['id']}` | **{info['nombre']}** | {info['funcion']} | `{info['rhea']}` |\n")
         f.write("\n")
 
-        f.write("## 3. Cinetica Enzimatica (Base de Datos Local)\n\n")
-        if os.path.exists("cinetica_local.json"):
-            try:
-                with open("cinetica_local.json", "r", encoding="utf-8") as file:
-                    db_cinetica = json.load(file)
-            except:
-                db_cinetica = {}
-                
-            reacciones_a_analizar = [quimico]
-            for g in mejor_genes:
-                if g in modelo.genes:
-                    for rxn in modelo.genes.get_by_id(g).reactions:
-                        if rxn.id not in reacciones_a_analizar:
-                            reacciones_a_analizar.append(rxn.id)
-                            
-            encontrados = False
-            tabla_cinetica = "| Reaccion | Enzima | kcat (1/s) | Km (mM) |\n| :--- | :--- | :--- | :--- |\n"
-            for r_id in reacciones_a_analizar:
-                if r_id in db_cinetica:
-                    datos = db_cinetica[r_id]
-                    tabla_cinetica += f"| `{r_id}` | {datos.get('enzima', 'Desconocida')} | {datos.get('kcat', 'N/A')} | {datos.get('Km', 'N/A')} |\n"
-                    encontrados = True
-            
-            if encontrados:
-                f.write("Los siguientes parametros fueron extraidos de la base de datos local (`cinetica_local.json`).\n\n")
-                f.write(tabla_cinetica)
-            else:
-                f.write("*No se encontraron parametros cineticos para estas reacciones en la base de datos local.*\n\n")
-        else:
-            f.write("*No se encontro el archivo `cinetica_local.json`.*\n\n")
+        # FIX: La sección de "Cinetica Enzimatica" ha sido completamente eliminada.
+        # El README establece que la cinética fue removida por falta de datos curados (kcat/Km de BRENDA).
 
-        f.write("> **Nota de diseno:** El software prioriza la universalidad sin requerir licencias de pago (ej. BRENDA). El investigador puede agregar valores manualmente al JSON.\n\n")
-
-        f.write("## 4. Analisis Termodinamico (eQuilibrator)\n\n")
+        f.write("## 3. Analisis Termodinamico (eQuilibrator)\n\n")
         f.write("| Reaccion | DG' (kJ/mol) | Viable |\n")
         f.write("| :--- | :--- | :--- |\n")
 
@@ -131,6 +102,6 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
                 pass
 
         f.write("\n---\n")
-        f.write("*Generado automaticamente por MetaboEngineer Pro V5.8 - Universal*\n")
+        f.write("*Generado automaticamente por MetaboEngineer Pro v0.2.0*\n")
 
     console.print(f"[green]OK[/green] Reporte guardado: [cyan]{nombre_archivo}[/cyan]")

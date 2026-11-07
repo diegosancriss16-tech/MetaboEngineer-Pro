@@ -114,14 +114,13 @@ El GA puro (sin intervención) converge a la ATP sintasa, demostrando la barrera
 | 42 | GA Puro | atpB + ydiO + 11 pasajeros | 1.6444 |
 | 100 | GA Puro | atpB + 12 pasajeros | 1.5562 |
 | 42 | Seeding | KJ060 (4 genes) + 9 optimizados | 10.8056 |
-| 100 | Seeding | KJ060 (11 genes válidos) + 0 optimizados | 10.1242 |
-| **100** | **Seeding + Destilado (LOO)** | **11 genes destilados (sin atpE, sin ackA)** | **11.1867** |
+| **100** | **Seeding + Destilación (LOO)** | **Núcleo de 4 genes (ldhA, adhE, adhP, atpB)** | **10.1242** |
 
-**El Tercer Acto:** El GA sembrado descubrió un diseño híbrido inicial de 11 genes que combinaba la estrategia redox con la estrategia energética (fitness in silico de 10.1242). Sin embargo, al aplicar un algoritmo de **destilación (Leave-One-Out)** — eliminando genes pasajeros como `atpE` y explorando redundancias de isoenzimas como `ackA` — el fitness real escaló a **11.1867 mmol/gDW/h** (~1.12 mol/mol). Este diseño destilado retiene un **77.6%** de su producción al 90% de crecimiento, demostrando una robustez comparable al 81.9% de la cepa experimental de Jantama.
+**El Tercer Acto:** El GA sembrado descubrió un diseño que combinaba la estrategia redox con la estrategia energética, alcanzando un fitness **in silico** de **10.1242 mmol/gDW/h** (~1.01 mol/mol). Sin embargo, el verdadero hallazgo fue revelado al aplicar una **destilación iterativa (Leave-One-Out)**: el GA había arrastrado 7 pasajeros silenciosos. El núcleo real de este diseño es de tan solo **4 genes** (`b1380`, `b1241`, `b1478`, `b3738`), los cuales retienen un **79.0%** de su producción al 90% de crecimiento, y lo hacen con un crecimiento robusto de **\(\mu = 0.1071\)** (el doble del umbral de viabilidad).
 
-*Nota de rigor:* El diseño destilado supera el techo computacional *in silico* de KJ060 (7.7988), pero **no supera las mediciones experimentales reales en biorreactor (1.2–1.6 mol/mol, equivalentes a ~12–16 mmol/gDW/h)**.
+*Nota de rigor:* El diseño destilado de 4 genes supera el techo computacional *in silico* de KJ060 (7.7988), pero **no supera las mediciones experimentales reales en biorreactor (1.2–1.6 mol/mol, equivalentes a ~12–16 mmol/gDW/h)**.
 
-*(Genes del diseño destilado: `b1380`, `b1241`, `b1478`, `b4287`, `b3738`, `b3583`, `b0905`, `b1622`, `b4086`, `b0355`, `b4195`)*
+*(Genes del núcleo destilado: `b1380` (ldhA), `b1241` (adhE), `b1478` (adhP), `b3738` (atpB))*
 
 ---
 
@@ -129,12 +128,12 @@ El GA puro (sin intervención) converge a la ATP sintasa, demostrando la barrera
 
 La cepa KJ060 (Jantama et al. 2008; 5 KOs) **no es reproducible como deleciones monogénicas** debido a la redundancia de isoenzimas. Al extender los knockouts a las **familias completas (13 KOs)**, el diseño experimental alcanza:
 
-| Diseño | k | FVA-min @100% | FVA-min @90% | Retención |
-|---|---|---|---|---|
-| WT | 0 | 0.0526 | — | — |
-| atpB (óptimo in silico k=1) | 1 | 1.5562 | 0.0337 | 2.2% ❌ |
-| KJ060 extendido (in silico) | 13 | 7.7988 | 6.3910 | 81.9% |
-| **GA Sembrado + Destilado (in silico)** | **11** | **11.1867** | **8.6846** | **77.6%** ✅ |
+| Diseño | k | FVA-min @100% | FVA-min @90% | \(\mu\) | Retención |
+|---|---|---|---|---|---|
+| WT | 0 | 0.0526 | — | 0.1575 | — |
+| atpB (óptimo in silico k=1) | 1 | 1.5562 | 0.0337 | — | 2.2% ❌ |
+| KJ060 extendido (in silico) | 13 | 7.7988 | 6.3910 | 0.0665 | 81.9% |
+| **Núcleo Destilado (in silico)** | **4** | **10.1242** | **7.9986** | **0.1071** | **79.0%** ✅ |
 
 **El Valle de Aptitud:** Los primeros 7 knockouts de KJ060 empeoran el fitness (0.0394 y 0.0305). El salto de 255× ocurre al bloquear el transporte de formato (7.7872). Esto demuestra que el camino hacia el óptimo requiere cruzar pasos transitoriamente deletéreos (epistasis extrema), lo cual requiere estrategias de *seeding*.
 
@@ -184,13 +183,17 @@ BiGG puede fallar: el servidor tiene caídas intermitentes. Usa la descarga manu
 
 OptKnock heurístico: usamos un GA, no bilevel optimization exacto (MILP).
 
-Dependencia del Seeding: El GA puro no cruza el valle de aptitud hacia el óptimo global (converge a la ATP sintasa). Para encontrar el diseño híbrido de 11.18 se requiere la estrategia de siembra (seeding) + destilación.
+Dependencia del Seeding: El GA puro no cruza el valle de aptitud hacia el óptimo global (converge a la ATP sintasa). Para encontrar el núcleo de 4 genes se requiere la estrategia de siembra (seeding) + destilación LOO.
 
 Cinética ausente: los parámetros kcat/Km no están incluidos por defecto (requieren API de pago de BRENDA) y han sido removidos de los reportes automáticos para evitar confusiones.
 
 eQuilibrator: requiere conexión a internet para descargar compuestos.
 
-Margen de viabilidad fino en el óptimo: el diseño destilado tiene μ=0.0596, solo 1.19× sobre el umbral de viabilidad de la herramienta (0.05).
+Margen de viabilidad: El núcleo destilado tiene 
+μ
+=
+0.1071
+μ=0.1071, lo que le otorga un margen holgado (2.14× sobre el umbral de viabilidad de 0.05).
 
 🗺️ Roadmap (v0.3.0 y más allá)
 ☑ FBA + Algoritmo genético
@@ -202,7 +205,7 @@ Margen de viabilidad fino en el óptimo: el diseño destilado tiene μ=0.0596, s
 ☑ Tests con pytest + CI
 ☑ Docker
 ☑ Filtro universal de esencialidad
-☑ Simulación aerobia/anaerobia
+☑ Simulación aerobia/anaerobio
 ☑ Validación gen-a-gen contra Keio
 ☑ Benchmark de solvers (GLPK, SCIP, HiGHS)
 ☑ Validación experimental KJ060 (familias de isozimas, k=13)
@@ -210,7 +213,7 @@ Margen de viabilidad fino en el óptimo: el diseño destilado tiene μ=0.0596, s
 ☑ Leave-one-out del diseño epistático (atpF + nrdD)
 ☑ GA con mutación real y reproducibilidad determinista
 ☑ GA con k=13 (puro): No cruzó el valle (convergió a atpB).
-☑ Seeding de población + Destilación LOO: Rompió el valle y encontró el óptimo de 11.18.
+☑ Seeding de población + Destilación LOO iterativa: Rompió el valle y encontró el núcleo de 4 genes (10.12).
 ☑ Suite de Pruebas Adversariales (0 fallos S0/S1).
 ☑ Pipeline de Diseño Asistido (pipeline_design.py).
 □ Leave-family-out del diseño minimal.
