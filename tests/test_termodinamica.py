@@ -54,11 +54,22 @@ def test_reaccion_normal_de_textbook_usa_kegg(modelo_textbook):
     assert formula.count("kegg:") == 2 and "=" in formula
 
 
+class _EquilibratorFalso:
+    """Sustituto sin red: cualquier calculo de DG' falla, como con un compuesto no resuelto."""
+    p_h = p_mg = ionic_strength = None
+
+    def parse_reaction_formula(self, formula):
+        raise RuntimeError("compuesto no resuelto")
+
+
 def test_reporte_marca_intercambio_y_no_inventa_dg(modelo_textbook, monkeypatch, tmp_path):
     import reporte_investigador as rep
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(rep, "ComponentContribution", _EquilibratorFalso)
     monkeypatch.setattr(rep, "buscar_info_uniprot_rhea", lambda g, o="83333": (g, "n/d", "N/A"))
     rep.generar_documento_markdown(modelo_textbook, "textbook", "EX_succ_e", ["b1818"], 1.0)
     texto = next((tmp_path / "reportes").glob("REPORTE_*.md")).read_text(encoding="utf-8")
     fila = next(l for l in texto.splitlines() if l.startswith("| `EX_succ_e`"))
     assert "Intercambio" in fila
+    # Las reacciones internas que no se pueden calcular aparecen como N/D, no se omiten
+    assert "N/D" in texto

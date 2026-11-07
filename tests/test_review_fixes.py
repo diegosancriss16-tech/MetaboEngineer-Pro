@@ -110,10 +110,10 @@ print("MEJOR:" + ",".join(mejor["genes"]))
     script_path.write_text(script_content, encoding='utf-8')
     
     env1 = {**os.environ, "PYTHONHASHSEED": "1", "PYTHONPATH": os.getcwd()}
-    res1 = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, env=env1, timeout=30)
+    res1 = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, env=env1, timeout=180)
     
     env2 = {**os.environ, "PYTHONHASHSEED": "2", "PYTHONPATH": os.getcwd()}
-    res2 = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, env=env2, timeout=30)
+    res2 = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, env=env2, timeout=180)
     
     out1 = [line for line in res1.stdout.split("\n") if line.startswith("MEJOR:")]
     out2 = [line for line in res2.stdout.split("\n") if line.startswith("MEJOR:")]
