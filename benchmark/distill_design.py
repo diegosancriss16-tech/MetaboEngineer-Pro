@@ -8,7 +8,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import metabo_engineer as me
 from rich.console import Console
-from rich.table import Table
 
 console = Console()
 
@@ -17,7 +16,7 @@ def main():
     quimico = "EX_succ_e"
     ambiente = "anaerobio"
     
-    # Los 11 genes que arrojó el GA en la última corrida
+    # Los 11 genes que el GA encontró originalmente
     genes_ga = ["b1380", "b1241", "b1478", "b4287", "b3738", "b3583", "b0905", "b1622", "b4086", "b0355", "b4195"]
     
     modelo, _ = me.cargar_modelo_universal(modelo_id)
@@ -25,49 +24,50 @@ def main():
     gen_biomasa = me._detectar_gen_biomasa(modelo)
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
 
-    # 1. Evaluar el diseño original del GA
     console.print(f"[cyan]1. Evaluando diseño original del GA ({len(genes_ga)} genes)...[/cyan]")
     fit_orig = me.evaluar_bacteria(modelo, genes_ga, quimico, gen_biomasa)
     console.print(f"   Fitness original: {fit_orig:.4f}")
     
-    # 2. Destilación (Leave-One-Out)
-    tabla = Table(title="Destilación Leave-One-Out del Diseño GA")
-    tabla.add_column("Gen Eliminado", style="cyan")
-    tabla.add_column("Fitness Resultante", style="green")
-    tabla.add_column("Delta", style="magenta")
+    current_genes = list(genes_ga)
+    current_fit = fit_orig
+    improved = True
     
-    mejor_fit = fit_orig
-    mejor_genes = genes_ga.copy()
+    console.print("\n[cyan]2. Aplicando Destilación Iterativa (Leave-One-Out)...[/cyan]")
     
-    tabla.add_row("[bold]Ninguno (Original)[/bold]", f"{fit_orig:.4f}", "-")
-    
-    for gen in genes_ga:
-        subset = [g for g in genes_ga if g != gen]
-        fit = me.evaluar_bacteria(modelo, subset, quimico, gen_biomasa)
-        delta = fit - fit_orig
+    while improved:
+        improved = False
+        best_drop = None
+        best_drop_fit = current_fit
         
-        color = "green" if delta > 0 else "red"
-        tabla.add_row(gen, f"{fit:.4f}", f"[{color}]{delta:+.4f}[/{color}]")
-        
-        if fit > mejor_fit:
-            mejor_fit = fit
-            mejor_genes = subset
+        for gen in current_genes:
+            subset = [g for g in current_genes if g != gen]
+            fit = me.evaluar_bacteria(modelo, subset, quimico, gen_biomasa)
+            if fit >= current_fit - 1e-4:
+                if fit > best_drop_fit:
+                    best_drop = gen
+                    best_drop_fit = fit
+                elif fit == current_fit:
+                    best_drop = gen
+                    
+        if best_drop:
+            console.print(f"   -> Eliminado gen: {best_drop} (Fitness: {best_drop_fit:.4f})")
+            current_genes.remove(best_drop)
+            current_fit = best_drop_fit
+            improved = True
             
-    console.print(tabla)
-    console.print(f"\n[bold green]El mejor diseño destilado tiene {len(mejor_genes)} genes y un Fitness de {mejor_fit:.4f}[/bold green]")
-    console.print(f"Genes: {', '.join(mejor_genes)}")
+    console.print(f"\n[bold green]¡El diseño destilado (núcleo) tiene {len(current_genes)} genes y un Fitness de {current_fit:.4f}![/bold green]")
+    console.print(f"Genes: {', '.join(current_genes)}")
     
-    # 3. Guardar JSONs para el revisor
-    out_dir = PROJECT_ROOT / "benchmark" / "results"
+    out_dir = PROJECT_ROOT / "reportes"
     out_dir.mkdir(parents=True, exist_ok=True)
     
     with open(out_dir / "design_ga_11genes.json", "w") as f:
-        json.dump({"fitness": fit_orig, "genes": genes_ga, "descripcion": "Diseno original del GA (k=11)"}, f, indent=2)
+        json.dump({"fitness": fit_orig, "genes": genes_ga}, f, indent=2)
         
-    with open(out_dir / "design_distilled_best.json", "w") as f:
-        json.dump({"fitness": mejor_fit, "genes": mejor_genes, "descripcion": "Mejor diseno tras aplicar Leave-One-Out"}, f, indent=2)
+    with open(out_dir / "design_distilled_core.json", "w") as f:
+        json.dump({"fitness": current_fit, "genes": current_genes}, f, indent=2)
 
-    console.print(f"[green]OK[/green] JSONs guardados en benchmark/results/")
+    console.print(f"[green]OK[/green] JSONs guardados en reportes/")
 
 if __name__ == "__main__":
     main()
