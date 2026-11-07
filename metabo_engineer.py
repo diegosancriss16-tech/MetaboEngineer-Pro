@@ -83,7 +83,7 @@ def preguntar_seed():
     try:
         entrada = Prompt.ask("Semilla aleatoria (Enter = aleatoria)", default="").strip()
         return int(entrada) if entrada else random.randint(0, 999999)
-    except:
+    except (ValueError, EOFError, KeyboardInterrupt):
         return random.randint(0, 999999)
 
 
@@ -155,7 +155,9 @@ def _cargar_cache_uniprot():
     if not os.path.exists(_RUTA_CACHE_UNIPROT): return {}
     try:
         with open(_RUTA_CACHE_UNIPROT, "r", encoding="utf-8") as f: return json.load(f)
-    except: return {}
+    except Exception as e:
+        logging.warning(f"No se pudo leer el cache de UniProt: {e}")
+        return {}
 
 
 def _guardar_cache_uniprot(cache):
@@ -189,7 +191,8 @@ def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
                     cache[clave] = [nombre_gen, nombre_proteina]
                     _guardar_cache_uniprot(cache)
                 return nombre_gen, nombre_proteina
-    except: pass
+    except Exception as e:
+        logging.warning(f"Consulta a UniProt fallo: {e}")
     return gen_id, "No encontrado en UniProt"
 
 
@@ -204,7 +207,9 @@ def _cargar_indice():
     if not os.path.exists(_RUTA_INDICE): return {"version": 1, "modelos": {}}
     try:
         with open(_RUTA_INDICE, "r", encoding="utf-8") as f: return json.load(f)
-    except: return {"version": 1, "modelos": {}}
+    except Exception as e:
+        logging.warning(f"No se pudo leer el indice de modelos: {e}")
+        return {"version": 1, "modelos": {}}
 
 
 def _guardar_indice(indice):
@@ -229,7 +234,8 @@ def _sincronizar_indice():
         if archivo.endswith(".xml") and archivo[:-4] not in indice["modelos"]:
             try:
                 _registrar_modelo(read_sbml_model(os.path.join("modelos", archivo)), archivo[:-4], os.path.join("modelos", archivo), "manual")
-            except: pass
+            except Exception as e:
+                logging.warning(f"No se pudo registrar el modelo en el indice: {e}")
 
 
 def cargar_modelo_universal(modelo_id):
@@ -264,7 +270,8 @@ def cargar_modelo_universal(modelo_id):
             ruta_local = f"modelos/{nombre_base}.xml"
             write_sbml_model(modelo, ruta_local)
             _registrar_modelo(modelo, nombre_base, ruta_local, "cobrapy")
-        except: pass
+        except Exception as e:
+            logging.warning(f"No se pudo guardar el modelo descargado en disco: {e}")
         return modelo, f"Modelo '{nombre_base}' descargado via cobrapy."
     except Exception as e:
         raise ValueError(f"No se pudo cargar el modelo '{nombre_base}' desde BiGG. Error: {e}")
@@ -398,6 +405,37 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _ca
     return resultado
 
 
+def genes_candidatos_activos(modelo, umbral=UMBRAL_ACTIVO):
+    """Genes asociados a reacciones internas con flujo activo en el optimo del WT."""
+    sol = modelo.optimize()
+    activas = [r for r, v in sol.fluxes.items() if abs(v) > umbral and not r.startswith("EX_")]
+    return sorted({g.id for r in activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes})
+
+
+def evaluar_acoplamiento_fva(modelo_base, genes_apagados, quimico, gen_biomasa, _cache=None):
+    """Produccion minima garantizada (FVA-min) al 100% del crecimiento maximo del mutante."""
+    clave = tuple(sorted(genes_apagados))
+    if _cache is not None and clave in _cache:
+        return _cache[clave]
+
+    m = modelo_base.copy()
+    for gen in genes_apagados:
+        if gen in m.genes:
+            m.genes.get_by_id(gen).knock_out()
+    m.objective = gen_biomasa
+    sol = m.optimize()
+    resultado = 0.0
+    if sol.status == 'optimal' and sol.objective_value is not None and sol.objective_value > UMBRAL_CRECIMIENTO_MIN:
+        try:
+            fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
+            resultado = max(0.0, fva_res.minimum.iloc[0])
+        except Exception as e:
+            logging.warning(f"FVA fallo para {genes_apagados}: {e}")
+    if _cache is not None:
+        _cache[clave] = resultado
+    return resultado
+
+
 def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_split=3, descripcion="Evolucionando...", semillas=None):
     poblacion = []
     
@@ -462,7 +500,9 @@ def mostrar_cinetica_local(modelo, solucion, quimico):
     if not os.path.exists("cinetica_local.json"): return
     try:
         with open("cinetica_local.json", "r", encoding="utf-8") as f: db = json.load(f)
-    except: return
+    except Exception as e:
+        logging.warning(f"No se pudo leer cinetica_local.json: {e}")
+        return
     
     flujos = [(r, abs(v)) for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
     flujos.sort(key=lambda x: x[1], reverse=True)
@@ -516,7 +556,9 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
             try:
                 glc_uptake = abs(modelo.reactions.get_by_id("EX_glc__D_e").lower_bound)
                 if glc_uptake == 0: glc_uptake = 10.0
-            except: glc_uptake = 10.0
+            except KeyError:
+                logging.warning("EX_glc__D_e no existe; se asume captacion de 10.0 mmol/gDW/h")
+                glc_uptake = 10.0
                 
             rendimiento_mol_mol = prod_g100 / glc_uptake
 
@@ -593,7 +635,8 @@ def disenar_cepa_ia(modelo, nombre_organismo, modelo_id, seed=None):
         try: generar_documento_markdown(modelo, modelo_id, quimico, mejor["genes"], mejor["fitness"])
         except Exception as e: console.print(f"[yellow]WARN[/yellow] Reporte fallo: {e}")
     try: _exportar_resultado_json(modelo_id, quimico, "ia", mejor["genes"], mejor["fitness"], seed, {"gens": gens, "mut": mutaciones})
-    except: pass
+    except Exception as e:
+        logging.warning(f"No se pudo exportar el resultado JSON: {e}")
     analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
     
     return mejor
@@ -608,31 +651,15 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
     gen_biomasa = _detectar_gen_biomasa(modelo)
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
 
-    reacciones_activas = {r for r, v in modelo.optimize().fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")}
-    genes_candidatos = sorted({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes})
+    genes_candidatos = genes_candidatos_activos(modelo)
     if len(genes_candidatos) < 2: return
 
     _cache_eval = {}
-    def evaluar(genes):
-        clave = tuple(sorted(genes))
-        if clave in _cache_eval: return _cache_eval[clave]
-        m = modelo.copy()
-        for gen in genes:
-            if gen in m.genes: m.genes.get_by_id(gen).knock_out()
-        m.objective = gen_biomasa
-        sol = m.optimize()
-        resultado = 0.0
-        if sol.status == 'optimal' and sol.objective_value is not None and sol.objective_value > UMBRAL_CRECIMIENTO_MIN:
-            try:
-                fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
-                resultado = max(0.0, fva_res.minimum.iloc[0])
-            except Exception as e: 
-                logging.warning(f"FVA falló en optknock para {genes}: {e}")
-                resultado = 0.0
-        _cache_eval[clave] = resultado
-        return resultado
-
-    mejor = _evolucionar(genes_candidatos, max_mutaciones, generaciones, pop_size, evaluar, crossover_split=2)
+    mejor = _evolucionar(
+        genes_candidatos, max_mutaciones, generaciones, pop_size,
+        lambda g: evaluar_acoplamiento_fva(modelo, g, quimico, gen_biomasa, _cache=_cache_eval),
+        crossover_split=2,
+    )
 
     if mejor["fitness"] <= -1e5:
         console.print("\n[red]ERROR[/red] TODAS las evaluaciones fallaron.")
@@ -641,7 +668,8 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
     if mejor["fitness"] > 0:
         console.print(f"\n[green]OK[/green] OptKnock exitoso. Ratio FVA: {mejor['fitness']:.4f}")
         try: _exportar_resultado_json(modelo_id, quimico, "optknock", mejor["genes"], mejor["fitness"], seed)
-        except: pass
+        except Exception as e:
+            logging.warning(f"No se pudo exportar el resultado JSON: {e}")
         analisis_profundo(modelo, gen_biomasa, mejor["genes"], quimico)
     else:
         console.print("\n[red]ERROR[/red] No se encontro acoplamiento.")
@@ -695,7 +723,8 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
         console.print(f"Genes: {', '.join(mejor_combo)}")
         console.print(f"Ratio Real: {mejor_ratio:.4f}")
         try: _exportar_resultado_json(modelo_id, quimico, "optknock_exacto", mejor_combo, mejor_ratio, seed)
-        except: pass
+        except Exception as e:
+            logging.warning(f"No se pudo exportar el resultado JSON: {e}")
         analisis_profundo(modelo, gen_biomasa, mejor_combo, quimico)
     else:
         console.print("[red]No se encontró acoplamiento exacto.[/red]")
@@ -728,12 +757,15 @@ def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
 
     if MODULOS_EXTERNOS_DISPONIBLES:
         try: generar_mapa_universal(modelo_id, quimico)
-        except: pass
+        except Exception as e:
+            logging.warning(f"No se pudo generar el mapa metabolico: {e}")
     if REPORTE_DISPONIBLE:
         try: generar_documento_markdown(modelo, modelo_id, quimico, mejor["genes"], mejor["fitness"])
-        except: pass
+        except Exception as e:
+            logging.warning(f"No se pudo generar el reporte markdown: {e}")
     try: _exportar_resultado_json(modelo_id, quimico, "integral", mejor["genes"], mejor["fitness"], seed)
-    except: pass
+    except Exception as e:
+        logging.warning(f"No se pudo exportar el resultado JSON: {e}")
     
     return mejor
 
@@ -756,7 +788,7 @@ def main():
 
     try:
         opcion = Prompt.ask("Opcion", choices=list(ORGANISMOS.keys()) + claves_cache, default="2")
-    except: return
+    except (EOFError, KeyboardInterrupt): return
 
     if opcion.startswith("c") and opcion != "c0":
         modelo_id = list(cacheados.keys())[int(opcion[1:]) - 1]
@@ -788,7 +820,7 @@ def main():
         console.print("1. FBA | 2. IA | 3. OptKnock (GA) | 4. Integral | 5. Historial | 6. Limpiar Cache | 7. Inyectar Cafeína | 8. OptKnock Exacto | 9. Salir")
         try:
             op = Prompt.ask("\nSelecciona una opcion", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"])
-        except: break
+        except (EOFError, KeyboardInterrupt): break
 
         if op == "1":
             try:

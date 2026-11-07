@@ -1,13 +1,13 @@
 > **Required Notice:** Copyright Diego San Miguel Crisantos (https://github.com/diegosancriss16-tech/MetaboEngineer-Pro)
 
-# 🧬 MetaboEngineer Pro (v0.2.0)
+# 🧬 MetaboEngineer Pro (v0.2.7)
 
 > Suite integral de ingeniería metabólica y biología sintética para el diseño racional de cepas microbianas. 100% open-source y auditable.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
 [![Status](https://img.shields.io/badge/Status-Beta-orange.svg)]()
-[![Version](https://img.shields.io/badge/Version-v0.2.0-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/Version-v0.2.7-brightgreen.svg)]()
 [![COBRApy](https://img.shields.io/badge/COBRApy-%E2%89%A50.29-blue.svg)](https://opencobra.github.io/cobrapy/)
 [![eQuilibrator](https://img.shields.io/badge/eQuilibrator-%E2%89%A50.4-purple.svg)](https://equilibrator.weizmann.ac.il/)
 [![Tests](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml/badge.svg)](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml)
@@ -89,7 +89,7 @@ Como herramienta científica, el software debe fallar de forma segura ante entra
 | **S1** | Silencio mortal (devuelve datos falsos) | **0** ✅ |
 | **S0** | Crash (error no controlado) | **0** ✅ |
 
-**Certificación:** El software rechaza limpiamente químicos inexistentes, genes con errores tipográficos, ambientes inválidos y modelos corruptos. Cero fallos silenciosos garantizan que los resultados generados son siempre matemáticamente válidos sobre las premisas solicitadas.
+**Certificación:** El software rechaza limpiamente químicos inexistentes, genes con errores tipográficos, ambientes inválidos y modelos corruptos. En las 10 pruebas adversariales no se detectaron fallos silenciosos (S1) ni crashes (S0); esto no constituye una garantía general, solo cobertura de los casos probados.
 
 ---
 
@@ -213,7 +213,7 @@ bibtex
   author  = {San Miguel Crisantos, Diego},
   title   = {MetaboEngineer Pro: A Suite for Metabolic Engineering and Synthetic Biology},
   year    = {2025},
-  version = {v0.2.0},
+  version = {v0.2.7},
   url     = {https://github.com/diegosancriss16-tech/MetaboEngineer-Pro}
 }
 OptGene: Patil, K. R., et al. (2005). BMC Bioinformatics, 6(1), 308.

@@ -1,4 +1,5 @@
 import warnings
+import logging
 warnings.filterwarnings("ignore")
 
 import os
@@ -37,7 +38,8 @@ def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
             rhea_str = ", ".join(rhea_ids) if rhea_ids else "No en Rhea"
             
             return nombre, funcion, rhea_str
-    except: pass
+    except Exception as e:
+        logging.warning(f"Consulta UniProt/Rhea fallo: {e}")
     return gen_id, "No encontrado", "N/A"
 
 def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness):
@@ -98,10 +100,10 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
                 formula = construir_reaccion(modelo, modelo.reactions.get_by_id(r_id))
                 dg = cc.physiological_dg_prime(cc.parse_reaction_formula(formula)).value.magnitude
                 f.write(f"| `{r_id}` | {dg:.2f} | {'SI' if dg < 0 else 'NO'} |\n")
-            except:
-                pass
+            except Exception as e:
+                logging.warning(f"No se pudo calcular DG' de una reaccion: {e}")
 
         f.write("\n---\n")
-        f.write("*Generado automaticamente por MetaboEngineer Pro v0.2.0*\n")
+        f.write("*Generado automaticamente por MetaboEngineer Pro*\n")
 
     console.print(f"[green]OK[/green] Reporte guardado: [cyan]{nombre_archivo}[/cyan]")

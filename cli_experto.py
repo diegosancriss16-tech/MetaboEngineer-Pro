@@ -10,12 +10,14 @@ import sys
 import random
 import traceback
 from datetime import datetime
-from rich.progress import track
-from cobra.flux_analysis import flux_variability_analysis as fva
 
 from metabo_engineer import (
+    _detectar_gen_biomasa,
+    _evolucionar,
     cargar_modelo_universal,
+    evaluar_acoplamiento_fva,
     evaluar_bacteria,
+    genes_candidatos_activos,
     configurar_ambiente,
     obtener_genes_no_esenciales,
     get_organism_id,
@@ -47,95 +49,31 @@ def setup_logging():
     return log_file
 
 def metodo_ia(modelo, quimico, args):
-    gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
+    gen_biomasa = _detectar_gen_biomasa(modelo)
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
-    
+
     todos_los_genes = obtener_genes_no_esenciales(modelo, gen_biomasa)
-    
-    poblacion = []
-    for _ in range(args.poblacion):
-        genes = random.sample(todos_los_genes, min(args.mutaciones, len(todos_los_genes)))
-        poblacion.append({"genes": genes, "fitness": evaluar_bacteria(modelo, genes, quimico, gen_biomasa)})
-        
-    for gen in track(range(args.generaciones), description="Evolucionando..."):
-        poblacion.sort(key=lambda x: x["fitness"], reverse=True)
-        mejores = poblacion[:5]
-        nueva = mejores.copy()
-        while len(nueva) < args.poblacion:
-            p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(dict.fromkeys(p1[:3] + p2[3:]))
-            
-            # FIX: Relleno seguro
-            objetivo = min(args.mutaciones, len(todos_los_genes))
-            while len(hijo) < objetivo:
-                nuevo = random.choice(todos_los_genes)
-                if nuevo not in hijo:
-                    hijo.append(nuevo)
-            
-            if random.random() < 0.1 and hijo:
-                idx = random.randint(0, len(hijo) - 1)
-                nuevo_gen = random.choice(todos_los_genes)
-                if nuevo_gen not in hijo:
-                    hijo[idx] = nuevo_gen
-                    hijo = list(dict.fromkeys(hijo))
-                    
-            nueva.append({"genes": hijo, "fitness": evaluar_bacteria(modelo, hijo, quimico, gen_biomasa)})
-        poblacion = nueva
-    return sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
+    cache = {}
+    return _evolucionar(
+        todos_los_genes, args.mutaciones, args.generaciones, args.poblacion,
+        lambda g: evaluar_bacteria(modelo, g, quimico, gen_biomasa, _cache=cache),
+        crossover_split=3,
+    )
 
 def metodo_optknock(modelo, quimico, args):
-    gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
+    gen_biomasa = _detectar_gen_biomasa(modelo)
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
-    
-    sol_wt = modelo.optimize()
-    activas = {r for r, v in sol_wt.fluxes.items() if abs(v) > 0.01 and not r.startswith("EX_")}
-    genes_candidatos = sorted(list({g.id for r in activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes}))
-    
-    if len(genes_candidatos) < 2: raise RuntimeError("Pocos genes activos.")
-    
-    def evaluar(genes):
-        m = modelo.copy()
-        for g in genes:
-            if g in m.genes: m.genes.get_by_id(g).knock_out()
-        m.objective = gen_biomasa
-        s = m.optimize()
-        if s.status == "optimal" and s.objective_value > 0.01:
-            try:
-                fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
-                return max(0.0, fva_res.minimum.iloc[0])
-            except: return 0.0
-        return 0.0
-        
-    poblacion = []
-    for _ in range(args.poblacion):
-        genes = random.sample(genes_candidatos, min(args.mutaciones, len(genes_candidatos)))
-        poblacion.append({"genes": genes, "fitness": evaluar(genes)})
-        
-    for gen in track(range(args.generaciones), description="Evolucionando..."):
-        poblacion.sort(key=lambda x: x["fitness"], reverse=True)
-        mejores = poblacion[:5]
-        nueva = mejores.copy()
-        while len(nueva) < args.poblacion:
-            p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(dict.fromkeys(p1[:2] + p2[2:]))
-            
-            # FIX: Relleno seguro
-            objetivo = min(args.mutaciones, len(genes_candidatos))
-            while len(hijo) < objetivo:
-                nuevo = random.choice(genes_candidatos)
-                if nuevo not in hijo:
-                    hijo.append(nuevo)
-            
-            if random.random() < 0.1 and hijo:
-                idx = random.randint(0, len(hijo) - 1)
-                nuevo_gen = random.choice(genes_candidatos)
-                if nuevo_gen not in hijo:
-                    hijo[idx] = nuevo_gen
-                    hijo = list(dict.fromkeys(hijo))
-                    
-            nueva.append({"genes": hijo, "fitness": evaluar(hijo)})
-        poblacion = nueva
-    return sorted(poblacion, key=lambda x: x["fitness"], reverse=True)[0]
+
+    genes_candidatos = genes_candidatos_activos(modelo)
+    if len(genes_candidatos) < 2:
+        raise RuntimeError("Pocos genes activos.")
+
+    cache = {}
+    return _evolucionar(
+        genes_candidatos, args.mutaciones, args.generaciones, args.poblacion,
+        lambda g: evaluar_acoplamiento_fva(modelo, g, quimico, gen_biomasa, _cache=cache),
+        crossover_split=2,
+    )
 
 def main():
     parser = build_parser()
@@ -186,7 +124,7 @@ def main():
         nombre, funcion = traducir_gen_uniprot(g, id_uniprot)
         print(f"       {g:>15} | {nombre:<15} | {funcion[:50]}")
 
-    gen_biomasa = [r.id for r in modelo.reactions if "biomass" in r.id.lower()][0]
+    gen_biomasa = _detectar_gen_biomasa(modelo)
     try:
         print(f"\n[INFO] Analisis profundo + termodinamica...")
         analisis_profundo(modelo, gen_biomasa, mejor["genes"], args.quimico)

@@ -1,55 +1,11 @@
 import warnings
 warnings.filterwarnings("ignore")
 
-import re
-import json
-import os
-from cobra import Reaction, Metabolite
 from equilibrator_api import ComponentContribution, Q_
 from rich.console import Console
 from rich.table import Table
 
 console = Console()
-
-def inyectar_ruta_heterologa(modelo, quimico):
-    if quimico == "EX_caft_e":
-        # CORREGIDO Bug 5: Usar objetos Metabolite (para evitar ValueError en cobra 0.32)
-        caft_c = Metabolite('caft_c', name='Caffeine', compartment='c')
-        tbrm_c = Metabolite('tbrm_c', name='Theobromine', compartment='c')
-        xan_c = Metabolite('xan_c', name='Xanthine', compartment='c')
-        caft_e = Metabolite('caft_e', name='Caffeine', compartment='e')
-        xan_e = Metabolite('xan_e', name='Xanthine', compartment='e')
-        
-        # CORREGIDO Bug 5: Añadir SAM y SAH para balancear la masa (metilaciones)
-        sam_c = modelo.metabolites.get_by_id("sam_c") if "sam_c" in modelo.metabolites else Metabolite('sam_c', name='S-Adenosylmethionine', compartment='c')
-        sah_c = modelo.metabolites.get_by_id("sah_c") if "sah_c" in modelo.metabolites else Metabolite('sah_c', name='S-Adenosylhomocysteine', compartment='c')
-
-        for met in [caft_c, tbrm_c, xan_c, caft_e, xan_e, sam_c, sah_c]:
-            if met.id not in modelo.metabolites: 
-                modelo.add_metabolites([met])
-
-        reacciones = [Reaction('CAFT_RXN1'), Reaction('CAFT_RXN2'), Reaction('EX_caft_e'), Reaction('CAFT_TRANSPORT'), Reaction('EX_xan_e'), Reaction('XAN_TRANSPORT')]
-        
-        # CORREGIDO: Balance estequiométrico usando SAM (Xantina -> Teobromina necesita 2 SAM, Teobromina -> Cafeína necesita 1 SAM)
-        reacciones[0].add_metabolites({xan_c: -1.0, sam_c: -2.0, tbrm_c: 1.0, sah_c: 2.0})
-        reacciones[1].add_metabolites({tbrm_c: -1.0, sam_c: -1.0, caft_c: 1.0, sah_c: 1.0})
-        
-        reacciones[2].add_metabolites({caft_e: -1.0})
-        reacciones[3].add_metabolites({caft_c: -1.0, caft_e: 1.0})
-        reacciones[4].add_metabolites({xan_e: -1.0})
-        reacciones[5].add_metabolites({xan_e: -1.0, xan_c: 1.0})
-        
-        for r in reacciones:
-            if r.id not in modelo.reactions:
-                # CORREGIDO Bug 5: Limitar captación ilimitada de xantina
-                if r.id == "EX_xan_e":
-                    r.bounds = (-10, 1000) 
-                else:
-                    r.bounds = (-1000, 1000) if r.id.startswith("EX_") else (0, 1000)
-                modelo.add_reactions([r])
-                
-        return modelo, "EX_caft_e"
-    return None, None
 
 def construir_reaccion(modelo, reaccion):
     lado_izquierdo = []
