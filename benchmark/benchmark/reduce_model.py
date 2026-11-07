@@ -22,4 +22,4 @@ reduced_model = fastcc(model)
 
 print(f"Reacciones después de fastCC: {len(reduced_model.reactions)}")
 write_sbml_model(reduced_model, "iML1515_reduced.xml")
-print("✅ Modelo reducido guardado como iML1515_reduced.xml")
+print("✅ Modelo reducido guardado como iML1515_reduced.xml")   

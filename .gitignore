@@ -104,3 +104,5 @@ __pycache__/
 .coverage
 benchmark/results/
 data/
+*.xml
+__pycache__/

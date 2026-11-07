@@ -27,23 +27,23 @@ from metabo_engineer import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cli_experto.py",
-        description="MetaboEngineer Pro - CLI no interactivo para automatizacion."
+        description="MetaboEngineer Pro - CLI no interactivo."
     )
-    parser.add_argument("-m", "--modelo", required=True, help="ID del modelo (ej. textbook, iML1515)")
-    parser.add_argument("-q", "--quimico", required=True, help="Reaccion objetivo (ej. EX_succ_e)")
-    parser.add_argument("--metodo", choices=["ia", "optknock", "integral"], default="ia", help="Algoritmo a usar")
-    parser.add_argument("--ambiente", choices=["aerobio", "anaerobio"], default="aerobio", help="Condición de oxígeno")
+    parser.add_argument("-m", "--modelo", required=True)
+    parser.add_argument("-q", "--quimico", required=True)
+    parser.add_argument("--metodo", choices=["ia", "optknock", "integral"], default="ia")
+    parser.add_argument("--ambiente", choices=["aerobio", "anaerobio"], default="aerobio")
     parser.add_argument("--generaciones", type=int, default=10)
     parser.add_argument("--poblacion", type=int, default=20)
     parser.add_argument("--mutaciones", type=int, default=4)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--inyectar", action="store_true", help="Inyectar ruta si no existe (ej. cafeina)")
+    parser.add_argument("--inyectar", action="store_true")
     return parser
 
-def setup_logging(log_level_str="INFO"):
+def setup_logging():
     os.makedirs("logs", exist_ok=True)
     log_file = f"logs/cli_{datetime.now():%Y%m%d_%H%M%S}.log"
-    logging.basicConfig(level=getattr(logging, log_level_str), format="%(asctime)s [%(levelname)s] %(message)s", handlers=[logging.FileHandler(log_file, encoding="utf-8")])
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", handlers=[logging.FileHandler(log_file, encoding="utf-8")])
     return log_file
 
 def metodo_ia(modelo, quimico, args):
@@ -63,10 +63,15 @@ def metodo_ia(modelo, quimico, args):
         nueva = mejores.copy()
         while len(nueva) < args.poblacion:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(dict.fromkeys(p1[:3] + p2[3:])) # FIX: Reproducibilidad
-            if len(hijo) < args.mutaciones: hijo.append(random.choice(todos_los_genes))
+            hijo = list(dict.fromkeys(p1[:3] + p2[3:]))
             
-            # Mutación evitando duplicados
+            # FIX: Relleno seguro
+            objetivo = min(args.mutaciones, len(todos_los_genes))
+            while len(hijo) < objetivo:
+                nuevo = random.choice(todos_los_genes)
+                if nuevo not in hijo:
+                    hijo.append(nuevo)
+            
             if random.random() < 0.1 and hijo:
                 idx = random.randint(0, len(hijo) - 1)
                 nuevo_gen = random.choice(todos_los_genes)
@@ -112,10 +117,15 @@ def metodo_optknock(modelo, quimico, args):
         nueva = mejores.copy()
         while len(nueva) < args.poblacion:
             p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
-            hijo = list(dict.fromkeys(p1[:2] + p2[2:])) # FIX: Reproducibilidad
-            if len(hijo) < args.mutaciones: hijo.append(random.choice(genes_candidatos))
+            hijo = list(dict.fromkeys(p1[:2] + p2[2:]))
             
-            # Mutación evitando duplicados
+            # FIX: Relleno seguro
+            objetivo = min(args.mutaciones, len(genes_candidatos))
+            while len(hijo) < objetivo:
+                nuevo = random.choice(genes_candidatos)
+                if nuevo not in hijo:
+                    hijo.append(nuevo)
+            
             if random.random() < 0.1 and hijo:
                 idx = random.randint(0, len(hijo) - 1)
                 nuevo_gen = random.choice(genes_candidatos)
@@ -154,7 +164,7 @@ def main():
         else:
             print(f"[ERROR] '{args.quimico}' no existe. Usa --inyectar.", file=sys.stderr); return 3
 
-    print(f"[INFO] Ejecutando metodo '{args.metodo}' (gen={args.generaciones}, pop={args.poblacion}, mut={args.mutaciones})...")
+    print(f"[INFO] Ejecutando metodo '{args.metodo}'...")
 
     try:
         if args.metodo == "ia":
