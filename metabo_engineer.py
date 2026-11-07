@@ -3,13 +3,11 @@
 MetaboEngineer Pro
 Suite integral de ingenieria metabolica y biologia sintetica.
 
-v0.2.3 — Correcciones basadas en auditoría científica:
-  [FIX-1] Bug de O2: configurar_ambiente ahora reabre el oxígeno en aerobio.
-  [FIX-2] Retención real: analisis_profundo calcula FVA-min@90% (no max) 
-          para medir el colapso tipo knife-edge de genes como atpE.
-  [FIX-3] Caché robusta: el hash del archivo incluye los límites del medio,
-          invalidando la caché si se cambia la fuente de carbono.
-  [FIX-4] Semillas: _evolucionar acepta inyección de individuos conocidos.
+v0.2.4 — Refactorización final de código:
+  [FIX-1] Termodinámica: ahora analiza las reacciones ACTIVAS del mutante
+          (flujo > 0.01), no las reacciones de los genes eliminados.
+  [FIX-2] except: pass reemplazados por logging.warning en el hot-path.
+  [FIX-3] Umbrales de viabilidad unificados en constantes globales.
 """
 
 import warnings
@@ -40,7 +38,12 @@ from rich.panel import Panel
 
 console = Console()
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
+
+# 🛠️ FIX 3: Umbrales unificados
+UMBRAL_LETALIDAD_RELATIVA = 0.05    # 5% del WT para considerar un gen letal
+UMBRAL_CRECIMIENTO_MIN = 0.05       # Crecimiento mínimo absoluto para ser viable
+UMBRAL_ACTIVO = 0.01                # Flujo mínimo para considerar una reacción activa
 
 MODULOS_EXTERNOS_DISPONIBLES = False
 try:
@@ -107,7 +110,6 @@ def _asegurar_solver_funcional(modelo):
     return modelo
 
 
-# 🛠️ FIX 1: Reabrir O2 en aerobio
 def configurar_ambiente(modelo, ambiente):
     ambiente_limpio = str(ambiente).lower().strip()
     if ambiente_limpio not in ['aerobio', 'anaerobio']:
@@ -116,9 +118,9 @@ def configurar_ambiente(modelo, ambiente):
     modelo_amb = modelo.copy()
     if 'EX_o2_e' in modelo_amb.reactions:
         if ambiente_limpio == 'anaerobio':
-            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 0.0)  # Bloqueo total O2
+            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (0.0, 0.0)
         else:
-            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0) # REABRE O2
+            modelo_amb.reactions.get_by_id('EX_o2_e').bounds = (-1000.0, 1000.0)
     else:
         if ambiente_limpio == 'anaerobio':
             console.print("[yellow]WARN[/yellow] El modelo no tiene EX_o2_e.")
@@ -309,15 +311,12 @@ def inyectar_ruta_heterologa(modelo, quimico):
     return None, None
 
 
-# 🛠️ FIX 3: Hash del medio para invalidar caché
 def obtener_genes_no_esenciales(modelo, gen_biomasa):
     modelo_id = getattr(modelo, 'id', 'modelo_desconocido')
     if not modelo_id:
         modelo_id = "iML1515" if len(modelo.reactions) > 2000 else f"modelo_{len(modelo.reactions)}rxns"
 
     ambiente = _detectar_ambiente_modelo(modelo)
-    
-    # Generar hash de los límites de todos los intercambios para evitar caché obsoleta
     bounds_str = "".join([f"{r.id}_{r.bounds}" for r in modelo.exchanges])
     bounds_hash = hashlib.md5(bounds_str.encode()).hexdigest()[:8]
 
@@ -353,7 +352,8 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     for idx, row in resultados.iterrows():
         gene_id = list(row['ids'])[0] if isinstance(row['ids'], (set, frozenset, list)) else row['ids']
         growth = row['growth']
-        if growth is None or pd.isna(growth) or growth < (sol_wt * 0.05):
+        # 🛠️ FIX 3 aplicado aquí
+        if growth is None or pd.isna(growth) or growth < (sol_wt * UMBRAL_LETALIDAD_RELATIVA):
             letales.append(gene_id)
 
     todos = [g.id for g in modelo.genes]
@@ -396,7 +396,8 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _ca
         modelo.objective = gen_biomasa
         sol_biomasa = modelo.optimize()
 
-        if sol_biomasa.status == 'optimal' and sol_biomasa.objective_value is not None and sol_biomasa.objective_value >= 0.05:
+        # 🛠️ FIX 3 aplicado aquí
+        if sol_biomasa.status == 'optimal' and sol_biomasa.objective_value is not None and sol_biomasa.objective_value >= UMBRAL_CRECIMIENTO_MIN:
             max_biomasa_mut = sol_biomasa.objective_value
             modelo.reactions.get_by_id(gen_biomasa).lower_bound = max_biomasa_mut * 1.0
             modelo.objective = gen_objetivo
@@ -405,8 +406,9 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _ca
 
             if sol_prod.status == 'optimal' and sol_prod.objective_value is not None:
                 resultado = max(0.0, sol_prod.objective_value)
-    except Exception:
-        pass
+    except Exception as e:
+        # 🛠️ FIX 2: Ya no es un "except: pass" ciego
+        logging.warning(f"evaluar_bacteria falló para {genes_apagados}: {e}")
 
     if _cache is not None:
         _cache[clave] = resultado
@@ -451,27 +453,26 @@ def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_sp
     return max(poblacion, key=lambda x: x["fitness"])
 
 
-def analizar_termodinamica_cepa(modelo, quimico, genes_knockout):
+# 🛠️ FIX 1: Termodinámica y cinética sobre reacciones ACTIVAS
+def analizar_termodinamica_cepa(modelo, solucion, quimico):
     if not MODULOS_EXTERNOS_DISPONIBLES: return
-    reacciones = [quimico] if quimico in modelo.reactions else []
-    for gen_id in genes_knockout:
-        if gen_id in modelo.genes:
-            for rxn in modelo.genes.get_by_id(gen_id).reactions:
-                if rxn.id not in reacciones and not rxn.id.startswith("EX_"): reacciones.append(rxn.id)
-    try: analizar_termodinamica_universal(modelo, reacciones[:10])
-    except: pass
+    reacciones_activas = [r for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
+    reacciones = [quimico] + reacciones_activas[:10]
+    try: 
+        analizar_termodinamica_universal(modelo, reacciones)
+    except Exception as e:
+        console.print(f"[dim]WARN: Termodinamica fallo: {e}[/dim]")
 
 
-def mostrar_cinetica_local(modelo, quimico, genes_knockout):
+def mostrar_cinetica_local(modelo, solucion, quimico):
     if not os.path.exists("cinetica_local.json"): return
     try:
         with open("cinetica_local.json", "r", encoding="utf-8") as f: db = json.load(f)
     except: return
-    reacciones = [quimico]
-    for gen_id in genes_knockout:
-        if gen_id in modelo.genes:
-            for rxn in modelo.genes.get_by_id(gen_id).reactions:
-                if rxn.id not in reacciones: reacciones.append(rxn.id)
+    
+    reacciones_activas = [r for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
+    reacciones = [quimico] + reacciones_activas
+    
     tabla = Table(title="Parametros Cineticos (Datos Locales)")
     tabla.add_column("Reaccion", style="cyan"); tabla.add_column("Enzima", style="magenta"); tabla.add_column("kcat (1/s)"); tabla.add_column("Km (mM)")
     encontrados = 0
@@ -483,7 +484,6 @@ def mostrar_cinetica_local(modelo, quimico, genes_knockout):
     if encontrados > 0: console.print(tabla)
 
 
-# 🛠️ FIX 2: Retención real (FVA-min@90% vs FVA-min@100%)
 def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
     console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
@@ -506,20 +506,20 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
             sol_g100 = modelo_mut.optimize()
             prod_g100 = max(0.0, sol_g100.objective_value) if sol_g100.status == 'optimal' else 0.0
 
-            # 2. FVA-min @ 90% (Garantizado a 90%, para medir retención real)
+            # 2. FVA-min @ 90% (Garantizado a 90%)
             modelo_mut.reactions.get_by_id(gen_biomasa).lower_bound = max_bio * 0.9
             modelo_mut.objective = quimico
             modelo_mut.objective.direction = 'min'
             sol_g90 = modelo_mut.optimize()
             prod_g90 = max(0.0, sol_g90.objective_value) if sol_g90.status == 'optimal' else 0.0
 
-            # 3. FVA-max @ 90% (Cota superior optimista)
+            # 3. FVA-max @ 90% (Cota superior)
             modelo_mut.objective = quimico
             modelo_mut.objective.direction = 'max'
             sol_m90 = modelo_mut.optimize()
             prod_m90 = max(0.0, sol_m90.objective_value) if sol_m90.status == 'optimal' else 0.0
 
-            # Cálculo de retención (Knife-edge)
+            # Cálculo de retención
             retencion = (prod_g90 / prod_g100 * 100) if prod_g100 > 0 else 0.0
 
             try:
@@ -540,8 +540,9 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
                 carga = sol_m90.fluxes.abs().sum()
                 console.print(f"   -> Carga Metabolica (Max@90%): [bold magenta]{carga:.2f}[/bold magenta]")
                 
-            analizar_termodinamica_cepa(modelo_mut, quimico, genes_a_mutar)
-            mostrar_cinetica_local(modelo, quimico, genes_a_mutar)
+            # 🛠️ FIX 1 aplicado aquí: pasamos sol_g100 (el mínimo garantizado)
+            analizar_termodinamica_cepa(modelo_mut, sol_g100, quimico)
+            mostrar_cinetica_local(modelo_mut, sol_g100, quimico)
     except Exception as e:
         console.print(f"[yellow]WARN[/yellow] Analisis fallo: {e}")
 
@@ -619,7 +620,7 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
     gen_biomasa = _detectar_gen_biomasa(modelo)
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
 
-    reacciones_activas = {r for r, v in modelo.optimize().fluxes.items() if abs(v) > 0.01 and not r.startswith("EX_")}
+    reacciones_activas = {r for r, v in modelo.optimize().fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")}
     genes_candidatos = sorted({g.id for r in reacciones_activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes})
     if len(genes_candidatos) < 2: return
 
@@ -633,11 +634,13 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
         m.objective = gen_biomasa
         sol = m.optimize()
         resultado = 0.0
-        if sol.status == 'optimal' and sol.objective_value is not None and sol.objective_value > 0.01:
+        if sol.status == 'optimal' and sol.objective_value is not None and sol.objective_value > UMBRAL_ACTIVO:
             try:
                 fva_res = fva(m, [quimico], fraction_of_optimum=1.0)
                 resultado = max(0.0, fva_res.minimum.iloc[0])
-            except: resultado = 0.0
+            except Exception as e: 
+                logging.warning(f"FVA falló en optknock para {genes}: {e}")
+                resultado = 0.0
         _cache_eval[clave] = resultado
         return resultado
 
@@ -694,7 +697,8 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
                     if ratio > mejor_ratio:
                         mejor_ratio = ratio
                         mejor_combo = combo
-            except: pass
+            except Exception as e: 
+                logging.warning(f"FVA falló en optknock_exacto para {combo}: {e}")
 
     if mejor_combo:
         console.print(f"\n[bold green]¡OptKnock Exacto Exitoso![/bold green]")
