@@ -3,11 +3,12 @@
 MetaboEngineer Pro
 Suite integral de ingenieria metabolica y biologia sintetica.
 
-v0.2.4 — Refactorización final de código:
-  [FIX-1] Termodinámica: ahora analiza las reacciones ACTIVAS del mutante
-          (flujo > 0.01), no las reacciones de los genes eliminados.
-  [FIX-2] except: pass reemplazados por logging.warning en el hot-path.
-  [FIX-3] Umbrales de viabilidad unificados en constantes globales.
+v0.2.5 — Correcciones finales:
+  [FIX-1] _evolucionar ignora semillas vacías (evita el ValueError cuando
+          falla la resolución de nombres a IDs de BiGG).
+  [FIX-2] Termodinámica sobre reacciones ACTIVAS.
+  [FIX-3] except: pass reemplazados por logging.warning en el hot-path.
+  [FIX-4] Umbrales de viabilidad unificados.
 """
 
 import warnings
@@ -38,9 +39,9 @@ from rich.panel import Panel
 
 console = Console()
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
-# 🛠️ FIX 3: Umbrales unificados
+# Umbrales unificados
 UMBRAL_LETALIDAD_RELATIVA = 0.05    # 5% del WT para considerar un gen letal
 UMBRAL_CRECIMIENTO_MIN = 0.05       # Crecimiento mínimo absoluto para ser viable
 UMBRAL_ACTIVO = 0.01                # Flujo mínimo para considerar una reacción activa
@@ -352,7 +353,6 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
     for idx, row in resultados.iterrows():
         gene_id = list(row['ids'])[0] if isinstance(row['ids'], (set, frozenset, list)) else row['ids']
         growth = row['growth']
-        # 🛠️ FIX 3 aplicado aquí
         if growth is None or pd.isna(growth) or growth < (sol_wt * UMBRAL_LETALIDAD_RELATIVA):
             letales.append(gene_id)
 
@@ -396,7 +396,6 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _ca
         modelo.objective = gen_biomasa
         sol_biomasa = modelo.optimize()
 
-        # 🛠️ FIX 3 aplicado aquí
         if sol_biomasa.status == 'optimal' and sol_biomasa.objective_value is not None and sol_biomasa.objective_value >= UMBRAL_CRECIMIENTO_MIN:
             max_biomasa_mut = sol_biomasa.objective_value
             modelo.reactions.get_by_id(gen_biomasa).lower_bound = max_biomasa_mut * 1.0
@@ -407,7 +406,6 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _ca
             if sol_prod.status == 'optimal' and sol_prod.objective_value is not None:
                 resultado = max(0.0, sol_prod.objective_value)
     except Exception as e:
-        # 🛠️ FIX 2: Ya no es un "except: pass" ciego
         logging.warning(f"evaluar_bacteria falló para {genes_apagados}: {e}")
 
     if _cache is not None:
@@ -415,12 +413,19 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _ca
     return resultado
 
 
+# 🛠️ FIX: _evolucionar ignora semillas vacías
 def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_split=3, descripcion="Evolucionando...", semillas=None):
     poblacion = []
     
     if semillas:
         for s in semillas[:pop_size]:
-            poblacion.append({"genes": list(s), "fitness": fitness_fn(s)})
+            s_list = list(s)
+            if not s_list:  # Evita el ValueError si la semilla está vacía
+                continue
+            try:
+                poblacion.append({"genes": s_list, "fitness": fitness_fn(s_list)})
+            except ValueError:
+                continue  # Si la semilla no pasa la validación, la ignoramos
             
     while len(poblacion) < pop_size:
         gm = random.sample(pool_genes, min(k, len(pool_genes)))
@@ -453,7 +458,6 @@ def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_sp
     return max(poblacion, key=lambda x: x["fitness"])
 
 
-# 🛠️ FIX 1: Termodinámica y cinética sobre reacciones ACTIVAS
 def analizar_termodinamica_cepa(modelo, solucion, quimico):
     if not MODULOS_EXTERNOS_DISPONIBLES: return
     reacciones_activas = [r for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
@@ -499,27 +503,23 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
         if sol_bio.status == 'optimal':
             max_bio = sol_bio.objective_value
             
-            # 1. FVA-min @ 100% (Garantizado)
             modelo_mut.reactions.get_by_id(gen_biomasa).lower_bound = max_bio * 1.0
             modelo_mut.objective = quimico
             modelo_mut.objective.direction = 'min'
             sol_g100 = modelo_mut.optimize()
             prod_g100 = max(0.0, sol_g100.objective_value) if sol_g100.status == 'optimal' else 0.0
 
-            # 2. FVA-min @ 90% (Garantizado a 90%)
             modelo_mut.reactions.get_by_id(gen_biomasa).lower_bound = max_bio * 0.9
             modelo_mut.objective = quimico
             modelo_mut.objective.direction = 'min'
             sol_g90 = modelo_mut.optimize()
             prod_g90 = max(0.0, sol_g90.objective_value) if sol_g90.status == 'optimal' else 0.0
 
-            # 3. FVA-max @ 90% (Cota superior)
             modelo_mut.objective = quimico
             modelo_mut.objective.direction = 'max'
             sol_m90 = modelo_mut.optimize()
             prod_m90 = max(0.0, sol_m90.objective_value) if sol_m90.status == 'optimal' else 0.0
 
-            # Cálculo de retención
             retencion = (prod_g90 / prod_g100 * 100) if prod_g100 > 0 else 0.0
 
             try:
@@ -540,7 +540,6 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
                 carga = sol_m90.fluxes.abs().sum()
                 console.print(f"   -> Carga Metabolica (Max@90%): [bold magenta]{carga:.2f}[/bold magenta]")
                 
-            # 🛠️ FIX 1 aplicado aquí: pasamos sol_g100 (el mínimo garantizado)
             analizar_termodinamica_cepa(modelo_mut, sol_g100, quimico)
             mostrar_cinetica_local(modelo_mut, sol_g100, quimico)
     except Exception as e:
