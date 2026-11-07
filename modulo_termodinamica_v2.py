@@ -1,3 +1,4 @@
+import re
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -7,7 +8,23 @@ from rich.table import Table
 
 console = Console()
 
+_SUFIJO_COMPARTIMENTO = re.compile(r"_[a-z]{1,2}$")
+
+
+def _id_bigg_sin_compartimento(met_id):
+    """'atp_c' -> 'atp'. eQuilibrator indexa BiGG sin el sufijo de compartimento."""
+    return _SUFIJO_COMPARTIMENTO.sub("", met_id)
+
+
 def construir_reaccion(modelo, reaccion):
+    """Formula de eQuilibrator para una reaccion interna.
+
+    Lanza ValueError si la reaccion es de frontera o tiene un solo lado: una reaccion asi
+    no tiene un DG' bien definido y completarla con un sustrato inventado daria un numero falso.
+    """
+    if reaccion.boundary:
+        raise ValueError(f"{reaccion.id} es una reaccion de frontera (intercambio/demanda/sumidero)")
+
     lado_izquierdo = []
     lado_derecho = []
 
@@ -18,7 +35,7 @@ def construir_reaccion(modelo, reaccion):
         else: kegg_id = None
 
         if kegg_id and kegg_id.startswith('C'): termino = f"kegg:{kegg_id}"
-        else: termino = f"bigg:{metabolito.id}"
+        else: termino = f"bigg.metabolite:{_id_bigg_sin_compartimento(metabolito.id)}"
 
         # CORREGIDO Bug 6: No truncar con int(). Usar :g para decimales (ej. 0.5)
         if abs(coeficiente) != 1: 
@@ -27,9 +44,9 @@ def construir_reaccion(modelo, reaccion):
         if coeficiente < 0: lado_izquierdo.append(termino)
         else: lado_derecho.append(termino)
 
-    izq_str = " + ".join(lado_izquierdo) if lado_izquierdo else "bigg:h2o_c"
-    der_str = " + ".join(lado_derecho) if lado_derecho else "bigg:h2o_c"
-    return f"{izq_str} = {der_str}"
+    if not lado_izquierdo or not lado_derecho:
+        raise ValueError(f"{reaccion.id} tiene un solo lado; no se puede calcular DG'")
+    return f"{' + '.join(lado_izquierdo)} = {' + '.join(lado_derecho)}"
 
 def analizar_termodinamica_universal(modelo, reacciones_ids):
     console.print("\n[cyan]INFO[/cyan] Termodinamica Universal\n")
@@ -51,8 +68,9 @@ def analizar_termodinamica_universal(modelo, reacciones_ids):
             tabla.add_row(r_id, "Metabolito Sintetico", "N/A", "N/A")
             continue
 
-        formula = construir_reaccion(modelo, reaccion)
+        formula = ""
         try:
+            formula = construir_reaccion(modelo, reaccion)
             eq = cc.parse_reaction_formula(formula)
             dg = cc.physiological_dg_prime(eq).value.magnitude
             viable = "SI" if dg < 0 else "NO"

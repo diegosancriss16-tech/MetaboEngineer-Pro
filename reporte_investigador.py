@@ -89,12 +89,17 @@ def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness)
             if r_id.startswith("CAFT") or r_id.startswith("XAN") or r_id.startswith("EX_caft"):
                 f.write(f"| `{r_id}` | N/A (Sintetico) | N/A |\n")
                 continue
+            rxn_obj = modelo.reactions.get_by_id(r_id)
+            if rxn_obj.boundary:
+                f.write(f"| `{r_id}` | N/A (Intercambio) | N/A |\n")
+                continue
             try:
-                formula = construir_reaccion(modelo, modelo.reactions.get_by_id(r_id))
+                formula = construir_reaccion(modelo, rxn_obj)
                 dg = cc.physiological_dg_prime(cc.parse_reaction_formula(formula)).value.magnitude
                 f.write(f"| `{r_id}` | {dg:.2f} | {'SI' if dg < 0 else 'NO'} |\n")
             except Exception as e:
-                logging.warning(f"No se pudo calcular DG' de una reaccion: {e}")
+                logging.warning(f"No se pudo calcular DG' de {r_id}: {e}")
+                f.write(f"| `{r_id}` | N/D (compuesto no resuelto en eQuilibrator) | N/A |\n")
 
         f.write("\n---\n")
         f.write("*Generado automaticamente por MetaboEngineer Pro*\n")
