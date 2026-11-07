@@ -1,36 +1,28 @@
-﻿FROM python:3.10-slim
-
-<<<<<<< HEAD
-# Instalar dependencias del sistema (GLPK, SWIG, libexpat1 y libxml2 para SBML)
-RUN apt-get update && apt-get install -y \
-    glpk-utils \
-    libglpk-dev \
-    swig \
-    gcc \
-    g++ \
-    libexpat1 \
-    libexpat1-dev \
-    libxml2 \
-    libxml2-dev \
-=======
-FROM python:3.11-slim
+﻿FROM python:3.11-slim
 
 LABEL maintainer="Diego San Cristobal"
 LABEL description="MetaboEngineer Pro - Suite de Ingenieria Metabolica"
-LABEL version="0.2.7"
+LABEL version="0.2.8"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libglpk-dev \
         glpk-utils \
+        swig \
+        gcc \
+        g++ \
+        libexpat1 \
+        libexpat1-dev \
+        libxml2 \
+        libxml2-dev \
         git \
         curl \
->>>>>>> 28960a205200ccc85657bf1d171a0525c8aed74b
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

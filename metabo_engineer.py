@@ -5,6 +5,7 @@ MetaboEngineer Pro v0.2.8
 [FIX-2] Generador aleatorio (RNG) aislado para evitar interferencia con optlang.
 [FIX-3] Renombrado optknock_exacto (ya no dice MILP).
 [FIX-4] Termodinámica evalúa el sentido del flujo (viable si dg * flujo < 0).
+[FIX-5] Eliminado alias optknock_exacto_milp y textos "exacto" en consola.
 """
 
 import warnings
@@ -31,13 +32,12 @@ from rich.prompt import Prompt, IntPrompt
 from rich.progress import track
 from rich.panel import Panel
 
-from organismos import get_organism_id  # noqa: F401  (re-exportada: usada por el CLI y los benchmarks)
+from organismos import get_organism_id
 
 console = Console()
 
 __version__ = "0.2.8"
 
-# Umbrales unificados
 UMBRAL_LETALIDAD_RELATIVA = 0.05
 UMBRAL_CRECIMIENTO_MIN = 0.05
 UMBRAL_ACTIVO = 0.01
@@ -88,7 +88,6 @@ def preguntar_seed():
 
 
 def _asegurar_solver_funcional(modelo):
-    """Devuelve el modelo con un solver que optimiza; si ninguno puede, lanza RuntimeError."""
     try:
         valor = modelo.slim_optimize()
         if valor is None or pd.isna(valor):
@@ -314,7 +313,6 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
 
     ambiente = _detectar_ambiente_modelo(modelo)
     
-    # FIX 1: Añadimos el umbral y la versión al hash del caché
     bounds_str = "".join([f"{r.id}_{r.bounds}" for r in modelo.exchanges])
     bounds_str += f"_{UMBRAL_LETALIDAD_RELATIVA}_{__version__}"
     bounds_hash = hashlib.md5(bounds_str.encode()).hexdigest()[:8]
@@ -406,14 +404,12 @@ def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa, _ca
 
 
 def genes_candidatos_activos(modelo, umbral=UMBRAL_ACTIVO):
-    """Genes asociados a reacciones internas con flujo activo en el optimo del WT."""
     sol = modelo.optimize()
     activas = [r for r, v in sol.fluxes.items() if abs(v) > umbral and not r.startswith("EX_")]
     return sorted({g.id for r in activas if r in modelo.reactions for g in modelo.reactions.get_by_id(r).genes})
 
 
 def evaluar_acoplamiento_fva(modelo_base, genes_apagados, quimico, gen_biomasa, _cache=None):
-    """Produccion minima garantizada (FVA-min) al 100% del crecimiento maximo del mutante."""
     clave = tuple(sorted(genes_apagados))
     if _cache is not None and clave in _cache:
         return _cache[clave]
@@ -437,10 +433,6 @@ def evaluar_acoplamiento_fva(modelo_base, genes_apagados, quimico, gen_biomasa, 
 
 
 def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_split=3, descripcion="Evolucionando...", semillas=None, rng=None):
-    """Algoritmo genetico de k knockouts.
-    
-    FIX 2: El azar sale de un generador PRIVADO. Si no se pasa `rng`, se crea uno nuevo.
-    """
     if rng is None:
         rng = random.Random(random.getrandbits(64))
         
@@ -492,7 +484,6 @@ def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_sp
     return max(poblacion, key=lambda x: x["fitness"])
 
 
-# FIX 4: Termodinámica evalúa el sentido del flujo
 def analizar_termodinamica_cepa(modelo, solucion, quimico):
     if not MODULOS_EXTERNOS_DISPONIBLES: return
     flujos = [(r, abs(v)) for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
@@ -502,29 +493,6 @@ def analizar_termodinamica_cepa(modelo, solucion, quimico):
         analizar_termodinamica_universal(modelo, reacciones, fluxes=solucion.fluxes)
     except Exception as e:
         console.print(f"[dim]WARN: Termodinamica fallo: {e}[/dim]")
-
-
-def mostrar_cinetica_local(modelo, solucion, quimico):
-    if not os.path.exists("cinetica_local.json"): return
-    try:
-        with open("cinetica_local.json", "r", encoding="utf-8") as f: db = json.load(f)
-    except Exception as e:
-        logging.warning(f"No se pudo leer cinetica_local.json: {e}")
-        return
-    
-    flujos = [(r, abs(v)) for r, v in solucion.fluxes.items() if abs(v) > UMBRAL_ACTIVO and not r.startswith("EX_")]
-    flujos.sort(key=lambda x: x[1], reverse=True)
-    reacciones = [quimico] + [r for r, v in flujos[:10]]
-    
-    tabla = Table(title="Parametros Cineticos (Datos Locales)")
-    tabla.add_column("Reaccion", style="cyan"); tabla.add_column("Enzima", style="magenta"); tabla.add_column("kcat (1/s)"); tabla.add_column("Km (mM)")
-    encontrados = 0
-    for r_id in reacciones:
-        if r_id in db:
-            d = db[r_id]
-            tabla.add_row(r_id, d.get("enzima", "-"), str(d.get("kcat", "-")), str(d.get("Km", "-")))
-            encontrados += 1
-    if encontrados > 0: console.print(tabla)
 
 
 def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
@@ -581,7 +549,6 @@ def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
                 console.print(f"   -> Carga Metabolica (Max@90%): [bold magenta]{carga:.2f}[/bold magenta]")
                 
             analizar_termodinamica_cepa(modelo_mut, sol_g100, quimico)
-            # mostrar_cinetica_local(modelo_mut, sol_g100, quimico)  <-- COMENTADO para coincidir con README
     except Exception as e:
         console.print(f"[yellow]WARN[/yellow] Analisis fallo: {e}")
 
@@ -692,11 +659,11 @@ def optknock_exacto(modelo, nombre_organismo, modelo_id, seed=None):
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
     if quimico not in modelo.reactions: return
 
-    max_knockouts = IntPrompt.ask("Genes exactos a apagar?", default=2)
+    max_knockouts = IntPrompt.ask("Número de genes a apagar (k)?", default=2)
     gen_biomasa = _detectar_gen_biomasa(modelo)
     modelo.reactions.get_by_id(quimico).bounds = (0, 1000.0)
 
-    console.print("\n[cyan]INFO[/cyan] Buscando el óptimo exacto (enumeración exhaustiva)...")
+    console.print("\n[cyan]INFO[/cyan] Buscando el óptimo global (enumeración exhaustiva)...")
     sol_wt = modelo.optimize()
     
     reacciones_activas = [r for r, v in sol_wt.fluxes.items() if abs(v) > 0.1 and not r.startswith("EX_")]
@@ -707,7 +674,7 @@ def optknock_exacto(modelo, nombre_organismo, modelo_id, seed=None):
     combinaciones = list(itertools.combinations(genes_activos, max_knockouts))
     console.print(f"   -> Evaluando {len(combinaciones)} combinaciones exactas...")
 
-    for combo in track(combinaciones, description="Buscando acoplamiento exacto..."):
+    for combo in track(combinaciones, description="Buscando acoplamiento óptimo..."):
         m = modelo.copy()
         for g in combo:
             if g in m.genes: m.genes.get_by_id(g).knock_out()
@@ -736,12 +703,11 @@ def optknock_exacto(modelo, nombre_organismo, modelo_id, seed=None):
             logging.warning(f"No se pudo exportar el resultado JSON: {e}")
         analisis_profundo(modelo, gen_biomasa, mejor_combo, quimico)
     else:
-        console.print("[red]No se encontró acoplamiento exacto.[/red]")
+        console.print("[red]No se encontró acoplamiento óptimo.[/red]")
 
 
-# Alias retrocompatible (nombre anterior, usado por scripts de benchmark/)
+# Alias retrocompatible para scripts antiguos
 optknock_exacto_milp = optknock_exacto
-
 
 def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
     rng = random.Random(seed)
