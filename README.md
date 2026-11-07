@@ -185,6 +185,8 @@ Dependencia de parámetros: El GA puro es capaz de cruzar el valle de aptitud, p
 
 Cinética ausente: los parámetros kcat/Km no están incluidos por defecto (requieren API de pago de BRENDA) y han sido removidos de los reportes automáticos para evitar confusiones.
 
+Artefacto termodinámico en ATPS4r: El cálculo de eQuilibrator para la ATP sintasa (ATPS4r) da un ΔG' positivo (~52 kJ/mol) porque no incluye el potencial electroquímico de membrana (que es el que impulsa la reacción in vivo). No es un error del código, sino una limitación del cálculo puramente estequiométrico.
+
 eQuilibrator: requiere conexión a internet para descargar compuestos.
 
 Margen de viabilidad: El núcleo destilado tiene μ = 0.1071, lo que le otorga un margen holgado (2.14× sobre el umbral de viabilidad de 0.05). Sin embargo, bajo restricciones de glucosa severas (glucosa 5), el μ cae a 0.0256.
