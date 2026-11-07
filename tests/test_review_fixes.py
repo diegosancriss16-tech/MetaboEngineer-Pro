@@ -92,6 +92,10 @@ def mock_eval(*args, **kwargs):
 
 me.evaluar_bacteria = mock_eval
 
+# El subproceso es un interprete nuevo (no hereda los fixtures): sin red ni eQuilibrator.
+me.REPORTE_DISPONIBLE = False
+me.traducir_gen_uniprot = lambda gen, *args, **kwargs: (gen, "mock")
+
 respuestas_int = iter([5, 12, 4])
 def fake_int_ask(*args, **kwargs):
     return next(respuestas_int)
@@ -110,10 +114,10 @@ print("MEJOR:" + ",".join(mejor["genes"]))
     script_path.write_text(script_content, encoding='utf-8')
     
     env1 = {**os.environ, "PYTHONHASHSEED": "1", "PYTHONPATH": os.getcwd()}
-    res1 = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, env=env1, timeout=180)
+    res1 = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, env=env1, timeout=120)
     
     env2 = {**os.environ, "PYTHONHASHSEED": "2", "PYTHONPATH": os.getcwd()}
-    res2 = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, env=env2, timeout=180)
+    res2 = subprocess.run([sys.executable, str(script_path)], capture_output=True, text=True, env=env2, timeout=120)
     
     out1 = [line for line in res1.stdout.split("\n") if line.startswith("MEJOR:")]
     out2 = [line for line in res2.stdout.split("\n") if line.startswith("MEJOR:")]
