@@ -433,7 +433,18 @@ def evaluar_acoplamiento_fva(modelo_base, genes_apagados, quimico, gen_biomasa, 
     return resultado
 
 
-def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_split=3, descripcion="Evolucionando...", semillas=None):
+def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_split=3, descripcion="Evolucionando...", semillas=None, rng=None):
+    """Algoritmo genetico de k knockouts.
+
+    Reproducibilidad: el azar sale de un generador PRIVADO. Por defecto se siembra con un unico
+    numero tomado del `random` global al empezar, asi que `random.seed(s)` antes de llamar sigue
+    funcionando. Despues de eso nadie mas puede alterar la secuencia: optlang crea cada modelo con
+    uuid.uuid1(), que en Python <= 3.12 consume el `random` global y hacia que la misma semilla
+    diera trayectorias distintas segun la version de Python (y segun cuantas evaluaciones
+    estuvieran en cache).
+    """
+    if rng is None:
+        rng = random.Random(random.getrandbits(64))
     poblacion = []
     
     if semillas:
@@ -452,7 +463,7 @@ def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_sp
             raise ValueError("Se proporcionaron semillas, pero NINGUNA es válida para este modelo.")
             
     while len(poblacion) < pop_size:
-        gm = random.sample(pool_genes, min(k, len(pool_genes)))
+        gm = rng.sample(pool_genes, min(k, len(pool_genes)))
         poblacion.append({"genes": gm, "fitness": fitness_fn(gm)})
 
     for _ in track(range(generaciones), description=descripcion):
@@ -460,18 +471,18 @@ def _evolucionar(pool_genes, k, generaciones, pop_size, fitness_fn, crossover_sp
         mejores = poblacion[:5]
         nueva = mejores.copy()
         while len(nueva) < pop_size:
-            p1, p2 = random.choice(mejores)["genes"], random.choice(mejores)["genes"]
+            p1, p2 = rng.choice(mejores)["genes"], rng.choice(mejores)["genes"]
             hijo = list(dict.fromkeys(p1[:crossover_split] + p2[crossover_split:]))
 
             objetivo = min(k, len(pool_genes))
             while len(hijo) < objetivo:
-                nuevo = random.choice(pool_genes)
+                nuevo = rng.choice(pool_genes)
                 if nuevo not in hijo:
                     hijo.append(nuevo)
 
-            if random.random() < 0.1 and hijo:
-                idx = random.randint(0, len(hijo) - 1)
-                nuevo_gen = random.choice(pool_genes)
+            if rng.random() < 0.1 and hijo:
+                idx = rng.randint(0, len(hijo) - 1)
+                nuevo_gen = rng.choice(pool_genes)
                 if nuevo_gen not in hijo:
                     hijo[idx] = nuevo_gen
                     hijo = list(dict.fromkeys(hijo))
