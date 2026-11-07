@@ -10,13 +10,11 @@ MetaboEngineer Pro v0.2.7
 import warnings
 warnings.filterwarnings("ignore")
 
-import cobra
 from cobra import Reaction, Metabolite
 from cobra.io import load_model, read_sbml_model, write_sbml_model
 from cobra.flux_analysis import flux_variability_analysis as fva, single_gene_deletion
 import random
 import os
-import sys
 import requests
 import time
 import re
@@ -33,6 +31,8 @@ from rich.prompt import Prompt, IntPrompt
 from rich.progress import track
 from rich.panel import Panel
 
+from organismos import get_organism_id  # noqa: F401  (re-exportada: usada por el CLI y los benchmarks)
+
 console = Console()
 
 __version__ = "0.2.7"
@@ -45,7 +45,7 @@ UMBRAL_ACTIVO = 0.01
 MODULOS_EXTERNOS_DISPONIBLES = False
 try:
     from visualizador_universal import generar_mapa_universal
-    from modulo_termodinamica_v2 import analizar_termodinamica_universal, construir_reaccion
+    from modulo_termodinamica_v2 import analizar_termodinamica_universal
     MODULOS_EXTERNOS_DISPONIBLES = True
 except ImportError:
     pass
@@ -88,21 +88,27 @@ def preguntar_seed():
 
 
 def _asegurar_solver_funcional(modelo):
+    """Devuelve el modelo con un solver que optimiza; si ninguno puede, lanza RuntimeError."""
     try:
         valor = modelo.slim_optimize()
         if valor is None or pd.isna(valor):
             raise RuntimeError("La optimizacion devolvio un valor no numerico.")
+        return modelo
     except Exception as e:
-        console.print(f"[yellow]WARN[/yellow] El solver activo no puede optimizar este modelo.")
+        console.print("[yellow]WARN[/yellow] El solver activo no puede optimizar este modelo.")
         console.print(f"       Razón: {e}")
         console.print("[yellow]WARN[/yellow] Cambiando automáticamente a GLPK...")
-        try:
-            modelo.solver = "glpk"
-            valor = modelo.slim_optimize()
-            if valor is None or pd.isna(valor):
-                 raise RuntimeError("GLPK tambien fallo silenciosamente.")
-        except Exception as e_glpk:
-            console.print(f"[red]ERROR[/red] GLPK tampoco pudo optimizar el modelo.")
+
+    try:
+        modelo.solver = "glpk"
+        valor = modelo.slim_optimize()
+        if valor is None or pd.isna(valor):
+            raise RuntimeError("GLPK devolvio un valor no numerico.")
+    except Exception as e_glpk:
+        raise RuntimeError(
+            f"Ningun solver pudo optimizar el modelo (ultimo error: {e_glpk}). "
+            "Revisa el medio de cultivo y las cotas de las reacciones."
+        ) from e_glpk
     return modelo
 
 
@@ -142,15 +148,6 @@ def _detectar_ambiente_modelo(modelo):
     return "sin_ex_o2"
 
 
-def get_organism_id(modelo_id: str) -> str:
-    if not modelo_id: return "83333"
-    if "iYO844" in modelo_id: return "224308"
-    if "iCW773" in modelo_id: return "196627"
-    if "iMM904" in modelo_id: return "559292"
-    if "iEK1008" in modelo_id: return "1773"
-    return "83333"
-
-
 def _cargar_cache_uniprot():
     if not os.path.exists(_RUTA_CACHE_UNIPROT): return {}
     try:
@@ -168,7 +165,7 @@ def _guardar_cache_uniprot(cache):
 def limpiar_cache_uniprot():
     if os.path.exists(_RUTA_CACHE_UNIPROT):
         os.remove(_RUTA_CACHE_UNIPROT)
-        console.print(f"[green]OK[/green] Cache eliminado.")
+        console.print("[green]OK[/green] Cache eliminado.")
 
 
 def traducir_gen_uniprot(gen_id, organismo_id_uniprot):
@@ -331,7 +328,7 @@ def obtener_genes_no_esenciales(modelo, gen_biomasa):
         except Exception as e:
             console.print(f"[yellow]WARN[/yellow] Error leyendo caché: {e}. Recalculando...")
 
-    console.print(f"[cyan]INFO[/cyan] Calculando filtro de esencialidad...")
+    console.print("[cyan]INFO[/cyan] Calculando filtro de esencialidad...")
 
     modelo_wt = modelo.copy()
     modelo_wt.solver = 'glpk'
@@ -520,7 +517,7 @@ def mostrar_cinetica_local(modelo, solucion, quimico):
 
 
 def analisis_profundo(modelo, gen_biomasa, genes_a_mutar, quimico):
-    console.print(f"\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
+    console.print("\n[cyan]INFO[/cyan] Analisis Profundo de la Cepa...")
     modelo_mut = modelo.copy()
 
     for gen_id in genes_a_mutar:
@@ -677,7 +674,8 @@ def optknock_algoritmo(modelo, nombre_organismo, modelo_id, seed=None):
     return mejor
 
 
-def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
+def optknock_exacto(modelo, nombre_organismo, modelo_id, seed=None):
+    """Enumeracion exhaustiva de combinaciones de k genes (no es un MILP)."""
     if seed is not None: random.seed(seed)
     quimico = Prompt.ask("Quimico objetivo", default="EX_succ_e").strip()
     if quimico not in modelo.reactions: return
@@ -719,7 +717,7 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
                 logging.warning(f"FVA falló en optknock_exacto para {combo}: {e}")
 
     if mejor_combo:
-        console.print(f"\n[bold green]¡OptKnock Exacto Exitoso![/bold green]")
+        console.print("\n[bold green]¡OptKnock Exacto Exitoso![/bold green]")
         console.print(f"Genes: {', '.join(mejor_combo)}")
         console.print(f"Ratio Real: {mejor_ratio:.4f}")
         try: _exportar_resultado_json(modelo_id, quimico, "optknock_exacto", mejor_combo, mejor_ratio, seed)
@@ -728,6 +726,10 @@ def optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed=None):
         analisis_profundo(modelo, gen_biomasa, mejor_combo, quimico)
     else:
         console.print("[red]No se encontró acoplamiento exacto.[/red]")
+
+
+# Alias retrocompatible (nombre anterior, usado por scripts de benchmark/)
+optknock_exacto_milp = optknock_exacto
 
 
 def analisis_integral(modelo, nombre_organismo, modelo_id, seed=None):
@@ -807,7 +809,7 @@ def main():
     ambiente = Prompt.ask("Condición ambiental", choices=["aerobio", "anaerobio"], default="aerobio")
     seed = preguntar_seed()
 
-    with console.status(f"[bold yellow]Cargando modelo...[/bold yellow]"):
+    with console.status("[bold yellow]Cargando modelo...[/bold yellow]"):
         try:
             modelo, msg = cargar_modelo_universal(modelo_id)
             modelo = configurar_ambiente(modelo, ambiente)
@@ -843,7 +845,7 @@ def main():
             modelo, _ = inyectar_ruta_heterologa(modelo, "EX_caft_e")
             console.print("[green]OK[/green] Ruta de cafeína inyectada.")
         elif op == "8":
-            try: optknock_exacto_milp(modelo, nombre_organismo, modelo_id, seed)
+            try: optknock_exacto(modelo, nombre_organismo, modelo_id, seed)
             except Exception as e: console.print(Panel(str(e), title="ERROR", border_style="red"))
         elif op == "9": break
 

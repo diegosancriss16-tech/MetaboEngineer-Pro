@@ -42,6 +42,7 @@ dev       = ["pytest>=7.4.0", "pytest-cov>=4.1.0"]
 # No usamos src/ layout: tus archivos están en la raíz, así que los declaramos explícitos
 py-modules = [
     "metabo_engineer",
+    "organismos",
     "cli_experto",
     "modulo_termodinamica_v2",
     "diagnostico",

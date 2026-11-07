@@ -75,6 +75,23 @@ def metodo_optknock(modelo, quimico, args):
         crossover_split=2,
     )
 
+FITNESS_FALLO_TOTAL = -1e5  # evaluar_bacteria devuelve -1e6 cuando una evaluacion falla
+
+
+def verificar_resultado(mejor, metodo):
+    """Imprime el estado del resultado y devuelve el codigo de salida (0 = hay acoplamiento)."""
+    if mejor["fitness"] <= FITNESS_FALLO_TOTAL:
+        print("[ERROR] TODAS las evaluaciones fallaron (fitness = -1e6). "
+              "Revisa el modelo, el ambiente y el quimico objetivo.", file=sys.stderr)
+        return 5
+    if mejor["fitness"] <= 0:
+        print(f"\n[WARN] {metodo.upper()} termino sin encontrar acoplamiento "
+              "(fitness 0). Prueba con mas generaciones, poblacion o genes a apagar.")
+    else:
+        print(f"\n[OK] {metodo.upper()} completado")
+    return 0
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
@@ -92,7 +109,10 @@ def main():
         print(f"[ERROR] {e}", file=sys.stderr); return 2
 
     print(f"[INFO] Configurando ambiente: {args.ambiente.upper()}...")
-    modelo = configurar_ambiente(modelo, args.ambiente)
+    try:
+        modelo = configurar_ambiente(modelo, args.ambiente)
+    except Exception as e:
+        print(f"[ERROR] {e}", file=sys.stderr); return 2
 
     if args.quimico not in modelo.reactions:
         if args.inyectar and args.quimico == "EX_caft_e":
@@ -114,7 +134,10 @@ def main():
     except Exception as e:
         print(f"[ERROR] {e}", file=sys.stderr); logging.error(traceback.format_exc()); return 4
 
-    print(f"\n[OK] {args.metodo.upper()} completado")
+    codigo = verificar_resultado(mejor, args.metodo)
+    if codigo != 0:
+        return codigo
+
     print(f"     Fitness: {mejor['fitness']:.4f} mmol/gDW/h")
     print(f"     Genes ({len(mejor['genes'])}): {', '.join(mejor['genes'])}")
 
@@ -126,7 +149,7 @@ def main():
 
     gen_biomasa = _detectar_gen_biomasa(modelo)
     try:
-        print(f"\n[INFO] Analisis profundo + termodinamica...")
+        print("\n[INFO] Analisis profundo + termodinamica...")
         analisis_profundo(modelo, gen_biomasa, mejor["genes"], args.quimico)
     except Exception as e:
         print(f"[WARN] Analisis profundo fallo: {e}")
@@ -134,7 +157,7 @@ def main():
     if args.metodo == "integral":
         try:
             from reporte_investigador import generar_documento_markdown
-            print(f"\n[INFO] Generando reporte cientifico...")
+            print("\n[INFO] Generando reporte cientifico...")
             generar_documento_markdown(modelo, args.modelo, args.quimico, mejor["genes"], mejor["fitness"])
         except Exception as e:
             print(f"[WARN] Reporte fallo: {e}")

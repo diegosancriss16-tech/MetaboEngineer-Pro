@@ -8,7 +8,6 @@ Cubre:
 """
 
 import json
-import pytest
 import metabo_engineer as me
 
 

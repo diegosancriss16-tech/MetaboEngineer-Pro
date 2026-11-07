@@ -6,21 +6,14 @@ import os
 import requests
 import time
 import re
-import json
 from datetime import datetime
 from equilibrator_api import ComponentContribution, Q_
 from rich.console import Console
 
 from modulo_termodinamica_v2 import construir_reaccion
+from organismos import get_organism_id
 
 console = Console()
-
-def get_organism_id(modelo_id: str) -> str:
-    if "iYO844" in modelo_id: return "224308"
-    if "iCW773" in modelo_id: return "196627"
-    if "iMM904" in modelo_id: return "559292"
-    if "iEK1008" in modelo_id: return "1773"
-    return "83333"
 
 def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
     if not re.search(r'\d', gen_id): return gen_id, "Nombre comun", "N/A"
@@ -43,7 +36,7 @@ def buscar_info_uniprot_rhea(gen_id, organism_id="83333"):
     return gen_id, "No encontrado", "N/A"
 
 def generar_documento_markdown(modelo, modelo_id, quimico, mejor_genes, fitness):
-    console.print(f"\n[cyan]INFO[/cyan] Generando Reporte Cientifico...")
+    console.print("\n[cyan]INFO[/cyan] Generando Reporte Cientifico...")
     organism_id = get_organism_id(modelo_id)
 
     genes_info = []

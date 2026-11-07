@@ -1,5 +1,5 @@
 ﻿import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 import metabo_engineer as me
 
 # --- FIX PARA test_core.py (Knockout extremo y ValueError) ---

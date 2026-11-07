@@ -33,10 +33,6 @@ jobs:
         pip install -r requirements.txt
         pip install pytest pytest-cov
         
-    - name: Descargar modelo para tests (FIX 301)
-      run: |
-        curl -L -o iML1515.xml "https://bigg.ucsd.edu/static/models/iML1515.xml"
-        
     - name: Run tests
       run: |
         pytest

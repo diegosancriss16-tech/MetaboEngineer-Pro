@@ -32,7 +32,7 @@ def construir_reaccion(modelo, reaccion):
     return f"{izq_str} = {der_str}"
 
 def analizar_termodinamica_universal(modelo, reacciones_ids):
-    console.print(f"\n[cyan]INFO[/cyan] Termodinamica Universal\n")
+    console.print("\n[cyan]INFO[/cyan] Termodinamica Universal\n")
     cc = ComponentContribution()
     cc.p_h, cc.p_mg, cc.ionic_strength = Q_(7.0), Q_(3.0), Q_("0.1 M")
 

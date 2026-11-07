@@ -3,7 +3,6 @@ import pytest
 import os
 import sys
 import subprocess
-import hashlib
 from cobra.io import load_model
 import metabo_engineer as me
 
