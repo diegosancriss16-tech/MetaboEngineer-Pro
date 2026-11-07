@@ -1,13 +1,13 @@
 > **Required Notice:** Copyright Diego San Miguel Crisantos (https://github.com/diegosancriss16-tech/MetaboEngineer-Pro)
 
-# 🧬 MetaboEngineer Pro (v0.2.0)
+# 🧬 MetaboEngineer Pro (v0.2.7)
 
 > Suite integral de ingeniería metabólica y biología sintética para el diseño racional de cepas microbianas. 100% open-source y auditable.
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial%201.0.0-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
 [![Status](https://img.shields.io/badge/Status-Beta-orange.svg)]()
-[![Version](https://img.shields.io/badge/Version-v0.2.0-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/Version-v0.2.7-brightgreen.svg)]()
 [![COBRApy](https://img.shields.io/badge/COBRApy-%E2%89%A50.29-blue.svg)](https://opencobra.github.io/cobrapy/)
 [![eQuilibrator](https://img.shields.io/badge/eQuilibrator-%E2%89%A50.4-purple.svg)](https://equilibrator.weizmann.ac.il/)
 [![Tests](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml/badge.svg)](https://github.com/diegosancriss16-tech/MetaboEngineer-Pro/actions/workflows/tests.yml)
@@ -89,7 +89,7 @@ Como herramienta científica, el software debe fallar de forma segura ante entra
 | **S1** | Silencio mortal (devuelve datos falsos) | **0** ✅ |
 | **S0** | Crash (error no controlado) | **0** ✅ |
 
-**Certificación:** El software rechaza limpiamente químicos inexistentes, genes con errores tipográficos, ambientes inválidos y modelos corruptos. Cero fallos silenciosos garantizan que los resultados generados son siempre matemáticamente válidos sobre las premisas solicitadas.
+**Certificación:** El software rechaza limpiamente químicos inexistentes, genes con errores tipográficos, ambientes inválidos y modelos corruptos. En las 10 pruebas adversariales no se detectaron fallos silenciosos (S1) ni crashes (S0); esto no constituye una garantía general, solo cobertura de los casos probados.
 
 ---
 
@@ -99,14 +99,20 @@ Como herramienta científica, el software debe fallar de forma segura ante entra
 Con un presupuesto pequeño (población 20, 10 generaciones), el GA converge a la ATP sintasa (`atpB`), demostrando que el paisaje de aptitud tiene un pico local dominante.
 
 ### k=4 (GA Puro, Sin Seeding)
-El experimento clave: **¿Puede el GA puro cruzar el valle de aptitud sin inyectar genes de Jantama?** La respuesta es **SÍ**. Al aumentar ligeramente la población (50) y las generaciones (15), el GA puro encontró un diseño de 10.8056 en la semilla 42, utilizando una ruta completamente distinta.
+El experimento clave: **¿Puede el GA puro cruzar el valle de aptitud sin inyectar genes de Jantama?** La respuesta es **SÍ, pero no con todas las semillas**. Con población 50 y 15 generaciones, el GA puro encontró un diseño de 10.8049 en 1 de 5 semillas (la 2024), utilizando una ruta completamente distinta; las otras convergieron a la ATP sintasa (42, 777, 1234) o se quedaron en el WT (100).
 
 | Semilla | Método | Genes KO | Fitness |
 |---|---|---|---|
-| 100 | GA Puro (k=4) | `b3726, b3059, b2366, b0110` | 0.0526 (WT) |
-| 2024 | GA Puro (k=4) | `b3747, b1511, b0485, b3737` | 1.5562 (atpB) |
-| **42** | **GA Puro (k=4)** | **`b2416, b1125, b1511, b3738`** | **10.8056** 🏆 |
+| 100 | GA Puro (k=4) | `b3722, b2239, b2835, b2130` | 0.0526 (WT) |
+| 42 | GA Puro (k=4) | `b3721, b4036, b3735, b0505` | 1.5562 (ATP sintasa) |
+| 777 | GA Puro (k=4) | `b3566, b1010, b0973, b3738` | 1.5562 (ATP sintasa) |
+| 1234 | GA Puro (k=4) | `b3786, b3734, b3785, b1448` | 1.5562 (ATP sintasa) |
+| **2024** | **GA Puro (k=4)** | **`b1090, b2415, b3732, b3708`** | **10.8049** 🏆 |
 | **100** | **Seeding + Destilación (LOO)** | **`b1380, b1241, b1478, b3738`** | **10.1242** 🏆 |
+
+El diseño de 10.8049 conserva el **84.2%** de su producción al 90% de crecimiento (9.0964), con μ = 0.0694.
+
+*Nota de reproducibilidad:* esta tabla se regeneró con la versión actual del GA, que usa un generador aleatorio propio: cada semilla da el mismo resultado en Python 3.12 y 3.13 (COBRApy 0.32.1, GLPK). Antes, el GA compartía el generador aleatorio global con `optlang` (que lo consume al crear cada modelo en Python ≤ 3.12), así que el resultado de cada semilla dependía de la versión de Python. Los diseños publicados antes (`b2416, b1125, b1511, b3738` → 10.8056; `b3747, b1511, b0485, b3737` → 1.5562; `b3726, b3059, b2366, b0110` → 0.0526) siguen evaluando exactamente igual, pero ya no se obtienen con esas semillas.
 
 **El Tercer Acto (El Núcleo de 4 Genes):** El GA sembrado descubrió un diseño inicial de 11 genes que combinaba la estrategia redox con la estrategia energética (10.1242). Sin embargo, al aplicar una **destilación iterativa (Leave-One-Out)** eliminando pasajeros silenciosos, se descubrió que el núcleo real es de tan solo **4 genes** (`b1380`, `b1241`, `b1478`, `b3738`). Este núcleo retiene un **79.0%** de su producción al 90% de crecimiento, con un crecimiento robusto de **μ = 0.1071** (el doble del umbral de viabilidad).
 
@@ -127,7 +133,7 @@ La cepa KJ060 (Jantama et al. 2008; 5 KOs) **no es reproducible como deleciones 
 | KJ060 extendido (in silico) | 13 | 7.7988 | 6.3910 | 0.0665 | 81.9% |
 | **Núcleo Destilado (in silico)** | **4** | **10.1242** | **7.9986** | **0.1071** | **79.0%** ✅ |
 
-**El Valle de Aptitud:** Los primeros 7 knockouts de KJ060 empeoran el fitness (0.0394 y 0.0305). El salto de 255× ocurre al bloquear el transporte de formato (7.7872). Esto demuestra que el camino hacia el óptimo requiere cruzar pasos transitoriamente deletéreos (epistasis extrema), lo cual requiere estrategias de *seeding* o un GA con suficiente población (como demostró la semilla 42).
+**El Valle de Aptitud:** Los primeros 7 knockouts de KJ060 empeoran el fitness (0.0394 y 0.0305). El salto de 255× ocurre al bloquear el transporte de formato (7.7872). Esto demuestra que el camino hacia el óptimo requiere cruzar pasos transitoriamente deletéreos (epistasis extrema), lo cual requiere estrategias de *seeding* o un GA con suficiente población (como demostró la semilla 2024).
 
 ---
 
@@ -200,7 +206,7 @@ Margen de viabilidad: El núcleo destilado tiene μ = 0.1071, lo que le otorga u
 ☑ Caracterización del valle de aptitud (5 intermedios, todos viables)
 ☑ Leave-one-out del diseño epistático (atpF + nrdD)
 ☑ GA con mutación real y reproducibilidad determinista
-☑ GA Puro k=4: Rompió el valle sin seeding y encontró un diseño de 10.80.
+☑ GA Puro k=4: Rompió el valle sin seeding en 1 de 5 semillas y encontró un diseño de 10.80.
 ☑ Seeding + Destilación LOO iterativa: Encontró el núcleo de 4 genes (10.12).
 ☑ Suite de Pruebas Adversariales (0 fallos S0/S1).
 ☑ Pipeline de Diseño Asistido (pipeline_design.py).
@@ -213,7 +219,7 @@ bibtex
   author  = {San Miguel Crisantos, Diego},
   title   = {MetaboEngineer Pro: A Suite for Metabolic Engineering and Synthetic Biology},
   year    = {2025},
-  version = {v0.2.0},
+  version = {v0.2.7},
   url     = {https://github.com/diegosancriss16-tech/MetaboEngineer-Pro}
 }
 OptGene: Patil, K. R., et al. (2005). BMC Bioinformatics, 6(1), 308.

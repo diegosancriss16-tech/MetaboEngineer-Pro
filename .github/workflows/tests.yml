@@ -9,7 +9,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python-version: ["3.10", "3.11"]
@@ -32,10 +32,6 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest pytest-cov
-        
-    - name: Descargar modelo para tests (FIX 301)
-      run: |
-        curl -L -o iML1515.xml "https://bigg.ucsd.edu/static/models/iML1515.xml"
         
     - name: Run tests
       run: |

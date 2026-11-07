@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "metaboengineer"
-version = "0.1.0b1"
+dynamic = ["version"]
 description = "Suite integrada de ingeniería metabólica para diseño racional de cepas (FBA + GA + OptKnock + termodinámica)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -42,12 +42,16 @@ dev       = ["pytest>=7.4.0", "pytest-cov>=4.1.0"]
 # No usamos src/ layout: tus archivos están en la raíz, así que los declaramos explícitos
 py-modules = [
     "metabo_engineer",
+    "organismos",
     "cli_experto",
     "modulo_termodinamica_v2",
     "diagnostico",
     "reporte_investigador",
     "visualizador_universal",
 ]
+
+[tool.setuptools.dynamic]
+version = {attr = "metabo_engineer.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

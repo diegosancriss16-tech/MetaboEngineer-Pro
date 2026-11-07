@@ -2,7 +2,7 @@ cff-version: 1.2.0
 title: "MetaboEngineer Pro: suite integrada de ingeniería metabólica y biología sintética para el diseño racional de cepas microbianas"
 message: "Si usas este software, por favor cítalo usando estos metadatos."
 type: software
-version: 0.1.0-beta
+version: 0.2.7
 license: LicenseRef-PolyForm-Noncommercial-1.0.0
 repository-code: "https://github.com/diegosancriss16-tech/MetaboEngineer-Pro"
 authors:

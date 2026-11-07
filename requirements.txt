@@ -28,7 +28,7 @@ requests>=2.28.0
 # --- Interfaz de terminal ---
 rich>=13.0.0
 
-# --- Interfaz web (opcional, para app_web.py) ---
+# --- Interfaz web (opcional; aun no incluida en el repositorio) ---
 streamlit>=1.30.0
 
 # --- Testing (opcional, para tests/) ---
