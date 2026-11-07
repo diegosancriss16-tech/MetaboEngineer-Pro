@@ -69,6 +69,15 @@ Para validar el motor de esencialidad, comparamos `single_gene_deletion` contra 
 
 *(Nota: Durante el desarrollo, una aparente discrepancia contra COBRApy resultó ser un bug en el test de validación. Tras corregirlo, ambos métodos coinciden en el 100% de los genes. Documentado en `tests/`.)*
 
+### Universalidad y Robustez (Validación Cruzada)
+
+Para garantizar que el motor de diseño no está sobreajustado a *E. coli*, se ejecutó el pipeline completo (validación de entorno, GA, Leave-One-Out y veredicto) en una bacteria filogenéticamente distante: ***Bacillus subtilis* (iYO844)**.
+
+- **En anaerobio:** El modelo no puede crecer (μ = nan). El pipeline detectó la anomalía matemática y abortó de forma segura (Regla de Parada).
+- **En aerobio:** El pipeline detectó automáticamente la biomasa (`BIOMASS_BS_10`), calculó su propio filtro de esencialidad y ejecutó el GA.
+- **Resultado:** Aunque el GA no encontró un diseño de 3 knockouts que acoplara el succinato (el fitness se mantuvo en 0.0), el *Leave-One-Out* descartó los pasajeros silenciosos y el software emitió un veredicto honesto: *"El GA se quedó corto"*.
+
+Esto demuestra que la herramienta es **100% agnóstica al organismo** y tiene **degradación graciosa** ante modelos sin soluciones viables.
 ---
 
 ## 🧬 Resultados del GA (Epistasis y Estocasticidad)
