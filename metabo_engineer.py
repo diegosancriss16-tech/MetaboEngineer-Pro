@@ -4,7 +4,7 @@ warnings.filterwarnings("ignore")
 import cobra
 from cobra import Reaction, Metabolite
 from cobra.io import load_model, read_sbml_model, write_sbml_model
-from cobra.flux_analysis import flux_variability_analysis as fva
+from cobra.flux_analysis import flux_variability_analysis as fva, single_gene_deletion
 from cobra.manipulation import knock_out_model_genes
 import random
 import os
@@ -18,6 +18,7 @@ import logging
 import pandas as pd
 import itertools
 from datetime import datetime
+from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from rich.prompt import Prompt, IntPrompt
@@ -170,7 +171,6 @@ def _sincronizar_indice():
                 _registrar_modelo(read_sbml_model(os.path.join("modelos", archivo)), archivo[:-4], os.path.join("modelos", archivo), "manual")
             except: pass
 
-# 🛠️ FIX 2: Lógica robusta para encontrar archivos locales o limpiar el string para BiGG
 def cargar_modelo_universal(modelo_id):
     if not modelo_id or not str(modelo_id).strip(): raise Exception("ID de modelo vacio.")
     modelo_id = str(modelo_id).strip()
@@ -182,16 +182,13 @@ def cargar_modelo_universal(modelo_id):
         except Exception as e:
             raise ValueError(f"No se pudo cargar '{modelo_id}' desde bundle COBRApy: {e}")
 
-    # Limpiamos el .xml para tener el nombre base real
     nombre_base = modelo_id[:-4] if modelo_id.endswith(".xml") else modelo_id
 
-    # 1. Buscar en el directorio actual (CWD) tal cual o con .xml
     for nombre_archivo in [modelo_id, f"{nombre_base}.xml"]:
         if os.path.exists(nombre_archivo):
             modelo = read_sbml_model(nombre_archivo)
             return modelo, f"Modelo '{nombre_base}' cargado desde {nombre_archivo} (CI)."
 
-    # 2. Buscar en la carpeta local 'modelos/'
     if not os.path.exists("modelos"): os.makedirs("modelos")
     for nombre_archivo in [modelo_id, f"{nombre_base}.xml"]:
         ruta_local = f"modelos/{nombre_archivo}"
@@ -200,7 +197,6 @@ def cargar_modelo_universal(modelo_id):
             _registrar_modelo(modelo, nombre_base, ruta_local, "local")
             return modelo, f"Modelo '{nombre_base}' cargado desde disco local."
 
-    # 3. Descargar desde BiGG (usando el nombre_base sin .xml)
     try:
         modelo = load_model(nombre_base)
         try:
@@ -244,33 +240,58 @@ def inyectar_ruta_heterologa(modelo, quimico):
         return modelo, "EX_caft_e"
     return None, None
 
-# 🛠️ FIX 1: Forzar solver GLPK en las copias para evitar crashes de Gurobi
+# 🛠️ FIX: Filtro de esencialidad con Caché (Ahorra ~20 mins en ejecuciones posteriores)
 def obtener_genes_no_esenciales(modelo, gen_biomasa):
-    console.print("[cyan]INFO[/cyan] Filtrando genes esenciales...")
-    genes_no_esenciales = []
+    modelo_id = getattr(modelo, 'id', 'modelo_desconocido')
+    if not modelo_id:
+        modelo_id = "iML1515" if len(modelo.reactions) > 2000 else f"modelo_{len(modelo.reactions)}rxns"
+        
+    cache_dir = Path("benchmark/results")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"essential_cache_{modelo_id}_{gen_biomasa}.json"
+    
+    # 1. Intentar leer del caché
+    if cache_file.exists():
+        console.print(f"[cyan]CACHÉ[/cyan] Cargando genes esenciales desde {cache_file}...")
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            console.print(f"[yellow]WARN[/yellow] Error leyendo caché: {e}. Recalculando...")
+            
+    # 2. Si no existe, calcular desde cero (usando single_gene_deletion para máxima velocidad)
+    console.print("[cyan]INFO[/cyan] Calculando filtro de esencialidad (esto puede tardar unos minutos la primera vez)...")
+    
     modelo_wt = modelo.copy()
-    modelo_wt.solver = 'glpk' # FIX: Evita el crash de Gurobi
+    modelo_wt.solver = 'glpk' # Evita el crash de Gurobi
     modelo_wt.objective = gen_biomasa
-    sol_wt = modelo_wt.optimize()
-    crecimiento_wt = sol_wt.objective_value if sol_wt.status == 'optimal' else 0.0
-
-    if crecimiento_wt <= 0: return [g.id for g in modelo.genes]
-
-    for gen in track(modelo.genes, description="Evaluando esencialidad..."):
-        if gen.id == "s0001" or "spontaneous" in gen.name.lower():
-            continue
-
-        m = modelo.copy()
-        m.solver = 'glpk' # FIX: Evita el crash de Gurobi en la copia interna
-        with m:
-            knock_out_model_genes(m, [gen.id])
-            m.objective = gen_biomasa
-            sol = m.slim_optimize(error_value=0.0)
-            if sol > (crecimiento_wt * 0.05):
-                genes_no_esenciales.append(gen.id)
-
-    console.print(f"[green]OK[/green] Se descartaron {len(modelo.genes) - len(genes_no_esenciales)} genes letales.")
-    return genes_no_esenciales
+    
+    sol_wt = modelo_wt.slim_optimize()
+    if sol_wt is None or sol_wt < 0.01:
+        return [g.id for g in modelo.genes]
+        
+    with modelo_wt:
+        resultados = single_gene_deletion(modelo_wt, modelo_wt.genes)
+        
+    letales = []
+    for idx, row in resultados.iterrows():
+        gene_id = list(row['ids'])[0] if isinstance(row['ids'], (set, frozenset, list)) else row['ids']
+        # Umbral del 5% igual que en el código original
+        if row['growth'] < (sol_wt * 0.05):
+            letales.append(gene_id)
+            
+    todos = [g.id for g in modelo.genes]
+    no_esenciales = [g for g in todos if g not in letales]
+    
+    # 3. Guardar en caché
+    try:
+        with open(cache_file, "w", encoding="utf-8") as f:
+            json.dump(no_esenciales, f)
+        console.print(f"[green]OK[/green] Caché guardado en {cache_file} ({len(no_esenciales)} genes no esenciales).")
+    except Exception as e:
+        console.print(f"[yellow]WARN[/yellow] No se pudo guardar el caché: {e}")
+        
+    return no_esenciales
 
 def evaluar_bacteria(modelo_base, genes_apagados, gen_objetivo, gen_biomasa):
     if not genes_apagados:
