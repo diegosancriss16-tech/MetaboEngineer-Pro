@@ -1,0 +1,33 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# Modelos (los descargamos con curl en CI)
+*.xml
+!modelos/_index.json
+
+# Reportes (excepto los diseños clave)
+reportes/*.json
+!reportes/design_*.json
+reportes/*.md
+!reportes/REPORTE_*.md
+reportes/historial.csv
+
+# Logs y cachés
+logs/
+cache_uniprot.json
+cinetica_local.json
+benchmark/results/*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "modelos": {
+    "iEK1008": {
+      "archivo": "iEK1008.xml",
+      "sha256": "63e87e1620e929f4e8f47e9a96bfcfe212dea6ee55bf6d8a96e47988c85ca61e",
+      "fecha": "2026-10-28T10:16:11",
+      "reacciones": 1226,
+      "metabolitos": 998,
+      "genes": 1008,
+      "fuente": "manual",
+      "tama\u00f1o_bytes": 5917862,
+      "alias_de": null
+    },
+    "iML1515": {
+      "archivo": "iML1515.xml",
+      "sha256": "9c772d44ca43350e40dc7ee86c7aa148796856be1eea45e5406c6df8f7dcde28",
+      "fecha": "2026-11-05T12:10:03",
+      "reacciones": 2712,
+      "genes": 1516
+    },
+    "iMM904": {
+      "archivo": "iMM904.xml",
+      "sha256": "a4bcff4f8f2228a5b1553264c3bcb1e8a8093907754446007f3f3b529d29d3e1",
+      "fecha": "2026-11-04T18:09:39",
+      "reacciones": 1577,
+      "genes": 905
+    },
+    "iYO844": {
+      "archivo": "iYO844.xml",
+      "sha256": "28e4ca32d412102481ac29f84b0267b1449108bbf1fa6efc604794b4a93b9740",
+      "fecha": "2026-10-28T10:16:18",
+      "reacciones": 1250,
+      "metabolitos": 990,
+      "genes": 844,
+      "fuente": "manual",
+      "tama\u00f1o_bytes": 6207610,
+      "alias_de": null
+    },
+    "textbook": {
+      "archivo": "textbook.xml",
+      "sha256": "cbb441865a34ce75719933ced9060d15721aea5f29fffa45605a044224d44a59",
+      "fecha": "2026-11-05T09:45:14",
+      "reacciones": 95,
+      "genes": 137
+    }
+  }
+}
